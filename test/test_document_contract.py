@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+from test.base import MCPIntegrationTestCase
+
+
+class DocumentContractTestCase(MCPIntegrationTestCase):
+    """覆盖文档导入、查询、删除、更新与失败路径。"""
+
+    def test_document_import_get_list_delete_smoke(self) -> None:
+        async def scenario() -> None:
+            category = await self.create_category(prefix="document_smoke")
+            document = await self.import_document(
+                category_id=category["id"],
+                title_prefix="document_smoke",
+            )
+            try:
+                get_payload = await self.tool("kb_document_get", id=document["id"])
+                self.assert_success(get_payload)
+                self.assertEqual(
+                    get_payload["data"]["document"]["document_uid"],
+                    document["document_uid"],
+                )
+
+                list_payload = await self.tool(
+                    "kb_document_list",
+                    category_id=category["id"],
+                    page=1,
+                    page_size=20,
+                )
+                self.assert_success(list_payload)
+                self.assertGreaterEqual(list_payload["data"]["pagination"]["total"], 1)
+
+                delete_payload = await self.tool("kb_document_delete", id=document["id"])
+                self.assert_success(delete_payload)
+                self.assertTrue(delete_payload["data"]["deleted"])
+
+                not_found_payload = await self.tool("kb_document_get", id=document["id"])
+                self.assert_error(not_found_payload, code="DOCUMENT_NOT_FOUND", error_type="not_found")
+            finally:
+                await self.delete_document_best_effort(document)
+                await self.delete_category_best_effort(category)
+
+        self.run_async(scenario())
+
+    def test_document_import_rejects_invalid_category(self) -> None:
+        async def scenario() -> None:
+            payload = await self.tool(
+                "kb_document_import",
+                category_id=99999999,
+                title="document_invalid_category",
+                file_name="Functional_Analysis.pdf",
+                mime_type="application/pdf",
+                file_content_base64=self.read_pdf_base64(),
+            )
+            self.assert_error(payload, code="CATEGORY_NOT_FOUND", error_type="not_found")
+
+        self.run_async(scenario())
+
+    def test_document_import_rejects_invalid_mime_type(self) -> None:
+        async def scenario() -> None:
+            category = await self.create_category(prefix="document_invalid_mime")
+            try:
+                payload = await self.tool(
+                    "kb_document_import",
+                    category_id=category["id"],
+                    title="invalid_mime_case",
+                    file_name="Functional_Analysis.txt",
+                    mime_type="text/plain",
+                    file_content_base64=self.read_pdf_base64(),
+                )
+                self.assert_error(payload, code="INVALID_ARGUMENT", error_type="validation_error")
+            finally:
+                await self.delete_category_best_effort(category)
+
+        self.run_async(scenario())
+
+    def test_document_import_rejects_invalid_base64(self) -> None:
+        async def scenario() -> None:
+            category = await self.create_category(prefix="document_invalid_base64")
+            try:
+                payload = await self.tool(
+                    "kb_document_import",
+                    category_id=category["id"],
+                    title="invalid_base64_case",
+                    file_name="Functional_Analysis.pdf",
+                    mime_type="application/pdf",
+                    file_content_base64="%%%not_base64%%%",
+                )
+                self.assert_error(payload, code="INVALID_ARGUMENT", error_type="validation_error")
+            finally:
+                await self.delete_category_best_effort(category)
+
+        self.run_async(scenario())
+
+    def test_category_delete_rejects_active_documents(self) -> None:
+        async def scenario() -> None:
+            category = await self.create_category(prefix="category_delete_guard")
+            document = await self.import_document(category_id=category["id"], title_prefix="guard_doc")
+            try:
+                payload = await self.tool("kb_category_delete", id=category["id"])
+                self.assert_error(payload, code="CATEGORY_HAS_DOCUMENTS", error_type="business_error")
+            finally:
+                await self.delete_document_best_effort(document)
+                await self.delete_category_best_effort(category)
+
+        self.run_async(scenario())
+
+    def test_document_update_metadata_only(self) -> None:
+        async def scenario() -> None:
+            source_category = await self.create_category(prefix="document_update_src")
+            target_category = await self.create_category(prefix="document_update_dst")
+            document = await self.import_document(
+                category_id=source_category["id"],
+                title_prefix="update_meta",
+            )
+            try:
+                payload = await self.tool(
+                    "kb_document_update",
+                    id=document["id"],
+                    category_id=target_category["id"],
+                    title="updated_document_title",
+                )
+                self.assert_success(payload)
+                updated = payload["data"]["document"]
+                self.assertEqual(updated["category_id"], target_category["id"])
+                self.assertEqual(updated["title"], "updated_document_title")
+            finally:
+                await self.delete_document_best_effort(document)
+                await self.delete_category_best_effort(source_category)
+                await self.delete_category_best_effort(target_category)
+
+        self.run_async(scenario())
