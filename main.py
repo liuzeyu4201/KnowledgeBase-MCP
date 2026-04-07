@@ -1,5 +1,8 @@
-def main():
-    print("Hello from knowledgebase!")
+from knowledgebase.mcp.server import run
+
+
+def main() -> None:
+    run()
 
 
 if __name__ == "__main__":

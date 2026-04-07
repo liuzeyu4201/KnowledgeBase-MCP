@@ -1,0 +1,122 @@
+services:
+  app:
+    build:
+      context: .
+      target: dev
+    container_name: knowledgebase-app-dev
+    env_file:
+      - .env.dev
+    environment:
+      KNOWLEDGEBASE_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      KNOWLEDGEBASE_MILVUS_HOST: milvus
+      KNOWLEDGEBASE_MILVUS_PORT: 19530
+      KNOWLEDGEBASE_MCP_TRANSPORT: http
+      KNOWLEDGEBASE_MCP_HOST: 0.0.0.0
+      KNOWLEDGEBASE_MCP_PORT: 8000
+      KNOWLEDGEBASE_MCP_PATH: /mcp
+      KNOWLEDGEBASE_AUTO_INIT_SCHEMA: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      milvus:
+        condition: service_started
+    volumes:
+      - .:/app
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: knowledgebase-postgres-dev
+    env_file:
+      - .env.dev
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.25
+    container_name: knowledgebase-etcd-dev
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: >
+      etcd
+      -advertise-client-urls=http://etcd:2379
+      -listen-client-urls=http://0.0.0.0:2379
+      --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    volumes:
+      - etcd_dev_data:/etcd
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    container_name: knowledgebase-minio-dev
+    command: minio server /minio_data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_dev_data:/minio_data
+    restart: unless-stopped
+
+  milvus:
+    image: milvusdb/milvus:v2.6.14
+    container_name: knowledgebase-milvus-dev
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_REGION: us-east-1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "${MILVUS_PORT:-19530}:19530"
+      - "${MILVUS_WEB_PORT:-9091}:9091"
+    volumes:
+      - milvus_dev_data:/var/lib/milvus
+    restart: unless-stopped
+
+volumes:
+  postgres_dev_data:
+  etcd_dev_data:
+  minio_dev_data:
+  milvus_dev_data:
