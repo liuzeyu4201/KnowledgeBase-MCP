@@ -16,3 +16,7 @@ wheels/
 
 # Docs
 @docs/
+
+# Local runtime files
+.DS_Store
+data/
