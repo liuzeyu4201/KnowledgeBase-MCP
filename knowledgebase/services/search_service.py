@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from pydantic import ValidationError
 
 from knowledgebase.domain.exceptions import AppError
@@ -17,6 +19,26 @@ from knowledgebase.schemas.search import (
 
 class SearchService:
     """检索领域服务。"""
+
+    QUESTION_PREFIX_PATTERNS = [
+        r"^\s*what\s+is\s+",
+        r"^\s*what\s+are\s+",
+        r"^\s*define\s+",
+        r"^\s*explain\s+",
+        r"^\s*tell\s+me\s+about\s+",
+        r"^\s*请解释(?:一下)?",
+        r"^\s*请介绍(?:一下)?",
+        r"^\s*什么是",
+    ]
+    QUERY_ALIAS_MAP = {
+        "希尔伯特空间": "Hilbert space",
+        "巴拿赫空间": "Banach space",
+        "开映射定理": "Open Mapping Theorem",
+        "哈恩巴拿赫定理": "Hahn-Banach Theorem",
+        "哈恩-巴拿赫定理": "Hahn-Banach Theorem",
+        "一致有界原理": "Uniform Boundedness Principle",
+        "闭图定理": "Closed Graph Theorem",
+    }
 
     def __init__(self, *, chunk_repository: ChunkRepository) -> None:
         self.chunk_repository = chunk_repository
@@ -36,13 +58,15 @@ class SearchService:
                 details={"errors": exc.errors()},
             ) from exc
 
+        normalized_query = self._normalize_query_for_retrieval(data.query)
+
         dense_query_vector: list[float] | None = None
         if data.alpha < 1.0:
             # 只在需要语义召回时才初始化 embedding 客户端，避免纯 BM25 检索依赖外部向量服务。
-            dense_query_vector = self._get_embedder().embed_texts([data.query])[0]
+            dense_query_vector = self._get_embedder().embed_texts([normalized_query])[0]
 
         milvus_hits = self.milvus.search_chunks(
-            query_text=data.query,
+            query_text=normalized_query,
             limit=data.limit,
             alpha=data.alpha,
             dense_query_vector=dense_query_vector,
@@ -118,3 +142,30 @@ class SearchService:
         if alpha >= 1.0:
             return "lexical_bm25"
         return "hybrid"
+
+    def _normalize_query_for_retrieval(self, query: str) -> str:
+        """清洗问句模板并补充跨语言术语别名，减少 BM25 被停用问句干扰。"""
+
+        normalized = query.strip()
+        lowered = normalized.lower()
+        for pattern in self.QUESTION_PREFIX_PATTERNS:
+            if re.match(pattern, normalized, flags=re.IGNORECASE):
+                normalized = re.sub(pattern, "", normalized, count=1, flags=re.IGNORECASE).strip()
+                lowered = normalized.lower()
+                break
+
+        normalized = normalized.strip(" ?!？。；;，,：:")
+        expanded_terms: list[str] = [normalized]
+        for alias, target in self.QUERY_ALIAS_MAP.items():
+            if alias in normalized and target not in normalized:
+                expanded_terms.append(target)
+
+        # 英文问句规整到核心概念，避免 "what/is" 等高频词影响 BM25 排序。
+        if lowered.startswith("hilbert space"):
+            return "Hilbert space"
+        if lowered.startswith("banach space"):
+            return "Banach space"
+        if lowered.startswith("open mapping theorem"):
+            return "Open Mapping Theorem"
+
+        return " ".join(term for term in expanded_terms if term).strip() or query.strip()

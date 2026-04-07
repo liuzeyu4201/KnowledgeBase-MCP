@@ -10,6 +10,22 @@ def utc_now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
+def _make_json_safe(value: Any) -> Any:
+    """把错误详情递归转换为可 JSON 序列化的结构。"""
+
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, BaseException):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _make_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_make_json_safe(item) for item in value]
+    return str(value)
+
+
 def build_success_response(
     *,
     data: dict[str, Any] | None = None,
@@ -51,6 +67,6 @@ def build_error_response(
         "timestamp": utc_now_iso(),
         "error": {
             "type": error_type,
-            "details": details or {},
+            "details": _make_json_safe(details or {}),
         },
     }
