@@ -19,6 +19,7 @@ class DocumentRepository:
         *,
         category_id: int,
         title: str,
+        source_type: str,
         file_name: str,
         storage_uri: str,
         mime_type: str,
@@ -30,6 +31,7 @@ class DocumentRepository:
         document = DocumentModel(
             category_id=category_id,
             title=title,
+            source_type=source_type,
             file_name=file_name,
             storage_uri=storage_uri,
             mime_type=mime_type,
@@ -148,6 +150,7 @@ class DocumentRepository:
         *,
         category_id: int | None = None,
         title: str | None = None,
+        source_type: str | None = None,
         file_name: str | None = None,
         storage_uri: str | None = None,
         mime_type: str | None = None,
@@ -165,6 +168,8 @@ class DocumentRepository:
             document.category_id = category_id
         if title is not None:
             document.title = title
+        if source_type is not None:
+            document.source_type = source_type
         if file_name is not None:
             document.file_name = file_name
         if storage_uri is not None:

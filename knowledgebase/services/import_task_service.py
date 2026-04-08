@@ -77,7 +77,7 @@ class ImportTaskService:
 
             item_rows = []
             for index, item in enumerate(data.items, start=1):
-                staged_file_uri, file_sha256 = self.storage.stage_task_pdf(
+                staged_file_uri, file_sha256 = self.storage.stage_task_file(
                     task_uid=task.task_uid,
                     item_no=index,
                     file_name=item.file_name,

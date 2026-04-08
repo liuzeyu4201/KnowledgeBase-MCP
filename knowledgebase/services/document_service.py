@@ -6,11 +6,12 @@ from dataclasses import dataclass, field
 
 from pydantic import ValidationError
 
+from knowledgebase.domain.document_types import resolve_document_source_type
 from knowledgebase.domain.exceptions import AppError
 from knowledgebase.integrations.chunking.text_chunker import TextChunker
 from knowledgebase.integrations.embedding.embedder import build_embedder
 from knowledgebase.integrations.milvus.collection_manager import MilvusCollectionManager
-from knowledgebase.integrations.parser.pdf_parser import PDFParser
+from knowledgebase.integrations.parser.document_parser import DocumentParser
 from knowledgebase.integrations.storage.file_storage import FileStorage
 from knowledgebase.repositories.category_repository import CategoryRepository
 from knowledgebase.repositories.chunk_repository import ChunkRepository
@@ -71,7 +72,7 @@ class DocumentService:
         self.document_repository = document_repository
         self.chunk_repository = chunk_repository
         self.storage = FileStorage()
-        self.parser = PDFParser()
+        self.parser = DocumentParser()
         self.chunker = TextChunker()
         self.embedder = build_embedder()
         self.milvus = MilvusCollectionManager()
@@ -80,7 +81,7 @@ class DocumentService:
         self._update_compensation_context: UpdateCompensationContext | None = None
 
     def import_document(self, payload: dict) -> dict:
-        """导入 PDF、创建文档与切片，并写入 Milvus 稠密向量和 BM25 索引。"""
+        """导入文档、创建切片，并写入 Milvus 稠密向量和 BM25 索引。"""
 
         self._compensation_context = ImportCompensationContext()
         try:
@@ -93,7 +94,7 @@ class DocumentService:
                 details={"errors": exc.errors()},
             ) from exc
 
-        file_bytes = self.storage.decode_base64_pdf(data.file_content_base64)
+        file_bytes = self.storage.decode_base64_file(data.file_content_base64)
         return self._import_document_from_bytes(
             data=data,
             file_bytes=file_bytes,
@@ -227,7 +228,7 @@ class DocumentService:
         }
 
     def update_document(self, payload: dict) -> dict:
-        """更新文档元数据，或以整篇重建方式替换 PDF、切片和向量。"""
+        """更新文档元数据，或以整篇重建方式替换文档、切片和向量。"""
 
         try:
             data = DocumentUpdateInput.model_validate(payload)
@@ -284,7 +285,7 @@ class DocumentService:
         self._update_compensation_context.old_storage_uri = old_storage_uri
         self._update_compensation_context.staged_old_storage_uri = staged_old_storage_uri
 
-        new_storage_uri, file_bytes = self.storage.save_pdf(
+        new_storage_uri, file_bytes = self.storage.save_file(
             file_name=data.file_name,
             file_content_base64=data.file_content_base64,
         )
@@ -292,7 +293,7 @@ class DocumentService:
         file_sha256 = hashlib.sha256(file_bytes).hexdigest()
 
         try:
-            pages = self.parser.parse(file_bytes)
+            pages = self.parser.parse(mime_type=data.mime_type, content=file_bytes)
             chunk_payloads = self.chunker.chunk_pages(pages)
             if not chunk_payloads:
                 raise AppError(
@@ -313,6 +314,7 @@ class DocumentService:
                 document,
                 category_id=data.category_id,
                 title=data.title,
+                source_type=resolve_document_source_type(data.mime_type),
                 file_name=data.file_name,
                 storage_uri=new_storage_uri,
                 mime_type=data.mime_type,
@@ -663,7 +665,7 @@ class DocumentService:
             )
 
         self._check_cooperative_cancellation(cancellation_checker)
-        storage_uri, saved_file_bytes = self.storage.save_pdf_bytes(
+        storage_uri, saved_file_bytes = self.storage.save_file_bytes(
             file_name=data.file_name,
             file_bytes=file_bytes,
         )
@@ -673,6 +675,7 @@ class DocumentService:
         document = self.document_repository.create(
             category_id=data.category_id,
             title=data.title,
+            source_type=resolve_document_source_type(data.mime_type),
             file_name=data.file_name,
             storage_uri=storage_uri,
             mime_type=data.mime_type,
@@ -684,7 +687,7 @@ class DocumentService:
 
         try:
             self._check_cooperative_cancellation(cancellation_checker)
-            pages = self.parser.parse(saved_file_bytes)
+            pages = self.parser.parse(mime_type=data.mime_type, content=saved_file_bytes)
 
             self._check_cooperative_cancellation(cancellation_checker)
             chunk_payloads = self.chunker.chunk_pages(pages)

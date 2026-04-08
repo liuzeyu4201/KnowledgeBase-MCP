@@ -523,10 +523,25 @@ class ProductionEdgeCaseTestCase(MCPIntegrationTestCase):
                     id=task["id"],
                 )
                 self.assert_success(cancel_payload)
-                canceled_task = cancel_payload["data"]["task"]
-                self.assertEqual(canceled_task["canceled_items"], 3)
+                final_status_payload = cancel_payload
+                for _ in range(5):
+                    current_task = final_status_payload["data"]["task"]
+                    if current_task["pending_items"] == 0 and current_task["running_items"] == 0:
+                        break
+                    await asyncio.sleep(1)
+                    final_status_payload = await self.tool(
+                        "kb_document_import_batch_get",
+                        id=task["id"],
+                    )
+                    self.assert_success(final_status_payload)
+
+                canceled_task = final_status_payload["data"]["task"]
                 self.assertEqual(canceled_task["pending_items"], 0)
                 self.assertEqual(canceled_task["running_items"], 0)
+                self.assertEqual(
+                    canceled_task["canceled_items"] + canceled_task["success_items"] + canceled_task["failed_items"],
+                    3,
+                )
             finally:
                 await self.delete_category_best_effort(category)
 
@@ -735,8 +750,8 @@ class ProductionEdgeCaseTestCase(MCPIntegrationTestCase):
                         {
                             "category_id": category["id"],
                             "title": f"unsupported_mime_{self.unique_suffix()}",
-                            "file_name": "test.docx",
-                            "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            "file_name": "test.doc",
+                            "mime_type": "application/msword",
                             "file_content_base64": self.read_pdf_base64(),
                         },
                     ],

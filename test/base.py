@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from io import BytesIO
 import os
 import time
 import unittest
 from pathlib import Path
 from typing import Any
+
+from docx import Document as DocxDocument
 
 from test.mcp_test_client import MCPToolClient
 
@@ -37,6 +40,31 @@ class MCPIntegrationTestCase(unittest.TestCase):
 
         pdf_path = self.large_pdf_path if large else self.small_pdf_path
         return base64.b64encode(pdf_path.read_bytes()).decode("utf-8")
+
+    def read_markdown_base64(self, *, title: str = "Markdown Title") -> str:
+        """构造 Markdown 文档并编码为 base64。"""
+
+        markdown = (
+            f"# {title}\n\n"
+            "这是一个 Markdown 导入测试文档。\n\n"
+            "- 第一条\n"
+            "- 第二条\n\n"
+            "## 子标题\n\n"
+            "线性代数与泛函分析会在这里相遇。"
+        )
+        return base64.b64encode(markdown.encode("utf-8")).decode("utf-8")
+
+    def read_docx_base64(self, *, title: str = "Docx Title") -> str:
+        """构造 DOCX 文档并编码为 base64。"""
+
+        document = DocxDocument()
+        document.add_heading(title, level=1)
+        document.add_paragraph("这是一个 Word 导入测试文档。")
+        document.add_paragraph("它包含多段正文，用于验证解析、切片和向量写入链路。")
+        document.add_paragraph("Hilbert space is a complete inner product space.")
+        buffer = BytesIO()
+        document.save(buffer)
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
     async def tool(self, tool_name: str, **arguments: Any) -> dict[str, Any]:
         """统一调用 MCP Tool。"""
@@ -84,18 +112,22 @@ class MCPIntegrationTestCase(unittest.TestCase):
         category_id: int,
         title_prefix: str = "test_document",
         large: bool = False,
+        file_name: str | None = None,
+        mime_type: str = "application/pdf",
+        file_content_base64: str | None = None,
     ) -> dict[str, Any]:
         """导入测试文档并登记清理信息。"""
 
         suffix = self.unique_suffix()
-        file_name = "Functional Analysis Notes.pdf" if large else "Functional_Analysis.pdf"
+        resolved_file_name = file_name or ("Functional Analysis Notes.pdf" if large else "Functional_Analysis.pdf")
+        resolved_file_content_base64 = file_content_base64 or self.read_pdf_base64(large=large)
         payload = await self.tool(
             "kb_document_import",
             category_id=category_id,
             title=f"{title_prefix}_{suffix}",
-            file_name=file_name,
-            mime_type="application/pdf",
-            file_content_base64=self.read_pdf_base64(large=large),
+            file_name=resolved_file_name,
+            mime_type=mime_type,
+            file_content_base64=resolved_file_content_base64,
         )
         self.assert_success(payload)
         return payload["data"]["document"]
@@ -109,3 +141,17 @@ class MCPIntegrationTestCase(unittest.TestCase):
         """尽最大努力删除测试分类。"""
 
         await self.tool("kb_category_delete", id=category["id"])
+
+    async def delete_documents_by_category_best_effort(self, *, category_id: int) -> None:
+        """尽最大努力删除某个分类下的全部文档。"""
+
+        payload = await self.tool(
+            "kb_document_list",
+            category_id=category_id,
+            page=1,
+            page_size=100,
+        )
+        if not payload.get("success"):
+            return
+        for item in payload["data"]["items"]:
+            await self.tool("kb_document_delete", id=item["id"])

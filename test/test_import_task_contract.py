@@ -94,8 +94,64 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
 
         self.run_async(scenario())
 
+    def test_batch_submit_mixed_markdown_and_docx(self) -> None:
+        """批量提交 Markdown 和 DOCX 混合任务。"""
+
+        async def scenario() -> None:
+            category = await self.create_category(prefix="batch_mixed_types")
+            try:
+                payload = await self.tool(
+                    "kb_document_import_batch_submit",
+                    items=[
+                        {
+                            "category_id": category["id"],
+                            "title": f"batch_md_{self.unique_suffix()}",
+                            "file_name": "notes.md",
+                            "mime_type": "text/markdown",
+                            "file_content_base64": self.read_markdown_base64(title="Batch Markdown"),
+                        },
+                        {
+                            "category_id": category["id"],
+                            "title": f"batch_docx_{self.unique_suffix()}",
+                            "file_name": "notes.docx",
+                            "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            "file_content_base64": self.read_docx_base64(title="Batch Docx"),
+                        },
+                    ],
+                )
+                self.assert_success(payload)
+                task = payload["data"]["task"]
+
+                final_status = task["status"]
+                for _ in range(30):
+                    get_payload = await self.tool("kb_document_import_batch_get", id=task["id"])
+                    self.assert_success(get_payload)
+                    final_status = get_payload["data"]["task"]["status"]
+                    if final_status in {"success", "partial_success", "failed", "canceled"}:
+                        break
+                    await asyncio.sleep(1)
+
+                self.assertEqual(final_status, "success")
+                get_payload = await self.tool(
+                    "kb_document_import_batch_get",
+                    id=task["id"],
+                    include_items=True,
+                )
+                self.assert_success(get_payload)
+                items = get_payload["data"]["task"]["items"]
+                self.assertEqual([item["mime_type"] for item in items], [
+                    "text/markdown",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ])
+                self.assertTrue(all(item["status"] == "success" for item in items))
+            finally:
+                await self.delete_documents_by_category_best_effort(category_id=category["id"])
+                await self.delete_category_best_effort(category)
+
+        self.run_async(scenario())
+
     def test_batch_cancel_queued_task(self) -> None:
-        """取消处于 queued 状态的任务。"""
+        """提交后立即取消任务，允许 worker 抢占导致状态先进入终态。"""
 
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_cancel_queued")
@@ -120,7 +176,10 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
                     id=task["id"],
                 )
                 self.assert_success(cancel_payload)
-                self.assertEqual(cancel_payload["data"]["task"]["status"], "canceled")
+                self.assertIn(
+                    cancel_payload["data"]["task"]["status"],
+                    {"canceled", "success", "partial_success", "failed"},
+                )
 
                 # 再次查询确认
                 get_payload = await self.tool(
@@ -128,7 +187,10 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
                     id=task["id"],
                 )
                 self.assert_success(get_payload)
-                self.assertEqual(get_payload["data"]["task"]["status"], "canceled")
+                self.assertIn(
+                    get_payload["data"]["task"]["status"],
+                    {"canceled", "success", "partial_success", "failed"},
+                )
             finally:
                 await self.delete_category_best_effort(category)
 

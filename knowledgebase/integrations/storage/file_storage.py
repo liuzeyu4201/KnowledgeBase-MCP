@@ -19,13 +19,13 @@ class FileStorage:
         self.task_root = (self.root / "_tasks").resolve()
         self.task_root.mkdir(parents=True, exist_ok=True)
 
-    def save_pdf(self, *, file_name: str, file_content_base64: str) -> tuple[str, bytes]:
-        """保存 PDF 原文件并返回文件路径与原始字节内容。"""
+    def save_file(self, *, file_name: str, file_content_base64: str) -> tuple[str, bytes]:
+        """保存原始文件并返回文件路径与原始字节内容。"""
 
-        content = self.decode_base64_pdf(file_content_base64)
-        return self.save_pdf_bytes(file_name=file_name, file_bytes=content)
+        content = self.decode_base64_file(file_content_base64)
+        return self.save_file_bytes(file_name=file_name, file_bytes=content)
 
-    def decode_base64_pdf(self, file_content_base64: str) -> bytes:
+    def decode_base64_file(self, file_content_base64: str) -> bytes:
         """解码上传文件内容，并统一执行空内容校验。"""
 
         try:
@@ -45,8 +45,8 @@ class FileStorage:
             )
         return content
 
-    def save_pdf_bytes(self, *, file_name: str, file_bytes: bytes) -> tuple[str, bytes]:
-        """保存已解码的 PDF 字节内容，供同步导入和后台任务复用。"""
+    def save_file_bytes(self, *, file_name: str, file_bytes: bytes) -> tuple[str, bytes]:
+        """保存已解码的文件字节内容，供同步导入和后台任务复用。"""
 
         safe_name = self._build_internal_file_name(
             prefix=uuid4().hex,
@@ -56,7 +56,7 @@ class FileStorage:
         target.write_bytes(file_bytes)
         return str(target), file_bytes
 
-    def stage_task_pdf(
+    def stage_task_file(
         self,
         *,
         task_uid: str,
@@ -66,7 +66,7 @@ class FileStorage:
     ) -> tuple[str, str]:
         """把批量导入文件先落到任务暂存目录，避免把大文件直接塞进数据库。"""
 
-        file_bytes = self.decode_base64_pdf(file_content_base64)
+        file_bytes = self.decode_base64_file(file_content_base64)
         task_dir = (self.task_root / task_uid).resolve()
         task_dir.mkdir(parents=True, exist_ok=True)
         safe_name = self._build_internal_file_name(
@@ -76,6 +76,38 @@ class FileStorage:
         target = task_dir / safe_name
         target.write_bytes(file_bytes)
         return str(target), hashlib.sha256(file_bytes).hexdigest()
+
+    def save_pdf(self, *, file_name: str, file_content_base64: str) -> tuple[str, bytes]:
+        """兼容旧调用方，内部复用通用文件保存逻辑。"""
+
+        return self.save_file(file_name=file_name, file_content_base64=file_content_base64)
+
+    def decode_base64_pdf(self, file_content_base64: str) -> bytes:
+        """兼容旧调用方，内部复用通用文件解码逻辑。"""
+
+        return self.decode_base64_file(file_content_base64)
+
+    def save_pdf_bytes(self, *, file_name: str, file_bytes: bytes) -> tuple[str, bytes]:
+        """兼容旧调用方，内部复用通用文件保存逻辑。"""
+
+        return self.save_file_bytes(file_name=file_name, file_bytes=file_bytes)
+
+    def stage_task_pdf(
+        self,
+        *,
+        task_uid: str,
+        item_no: int,
+        file_name: str,
+        file_content_base64: str,
+    ) -> tuple[str, str]:
+        """兼容旧调用方，内部复用通用任务暂存逻辑。"""
+
+        return self.stage_task_file(
+            task_uid=task_uid,
+            item_no=item_no,
+            file_name=file_name,
+            file_content_base64=file_content_base64,
+        )
 
     def read_file_bytes(self, file_path: str) -> bytes:
         """读取任务暂存文件，用于后台 worker 真正执行导入。"""

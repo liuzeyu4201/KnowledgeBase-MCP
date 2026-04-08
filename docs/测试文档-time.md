@@ -1,10 +1,10 @@
 # 测试文档
 
-- 生成时间: 2026-04-08T09:50:52.361158
+- 生成时间: 2026-04-08T10:36:03.056611
 - Python: 3.13.12
 - 平台: Linux-6.12.76-linuxkit-aarch64-with-glibc2.41
-- 执行用例总数: 114
-- 通过: 114
+- 执行用例总数: 118
+- 通过: 118
 - 失败: 0
 - 错误: 0
 - 跳过: 0
@@ -21,11 +21,14 @@ test_concurrent_duplicate_category_create_should_only_return_business_conflict (
 test_high_concurrency_search_requests_all_succeed (test_concurrency_pressure.ConcurrencyAndPressureTestCase.test_high_concurrency_search_requests_all_succeed) ... ok
 test_sequential_search_pressure_burst (test_concurrency_pressure.ConcurrencyAndPressureTestCase.test_sequential_search_pressure_burst) ... ok
 test_category_delete_rejects_active_documents (test_document_contract.DocumentContractTestCase.test_category_delete_rejects_active_documents) ... ok
+test_document_import_docx_smoke (test_document_contract.DocumentContractTestCase.test_document_import_docx_smoke) ... ok
 test_document_import_get_list_delete_smoke (test_document_contract.DocumentContractTestCase.test_document_import_get_list_delete_smoke) ... ok
+test_document_import_markdown_smoke (test_document_contract.DocumentContractTestCase.test_document_import_markdown_smoke) ... ok
 test_document_import_rejects_invalid_base64 (test_document_contract.DocumentContractTestCase.test_document_import_rejects_invalid_base64) ... ok
 test_document_import_rejects_invalid_category (test_document_contract.DocumentContractTestCase.test_document_import_rejects_invalid_category) ... ok
 test_document_import_rejects_invalid_mime_type (test_document_contract.DocumentContractTestCase.test_document_import_rejects_invalid_mime_type) ... ok
 test_document_update_metadata_only (test_document_contract.DocumentContractTestCase.test_document_update_metadata_only) ... ok
+test_document_update_replace_markdown_with_docx (test_document_contract.DocumentContractTestCase.test_document_update_replace_markdown_with_docx) ... ok
 test_cancel_queued_task_cleans_staged_files (test_import_task_consistency.ImportTaskConsistencyTestCase.test_cancel_queued_task_cleans_staged_files)
 一致性：取消 queued 任务后，暂存文件应被清理。 ... ok
 test_cancel_running_task_does_not_corrupt_other_items (test_import_task_consistency.ImportTaskConsistencyTestCase.test_cancel_running_task_does_not_corrupt_other_items)
@@ -69,7 +72,7 @@ test_batch_cancel_already_finished_task_returns_conflict (test_import_task_contr
 test_batch_cancel_not_found_task (test_import_task_contract.ImportTaskContractTestCase.test_batch_cancel_not_found_task)
 取消不存在的任务应返回 NOT_FOUND。 ... ok
 test_batch_cancel_queued_task (test_import_task_contract.ImportTaskContractTestCase.test_batch_cancel_queued_task)
-取消处于 queued 状态的任务。 ... ok
+提交后立即取消任务，允许 worker 抢占导致状态先进入终态。 ... ok
 test_batch_cancel_rejects_neither_id_nor_task_uid (test_import_task_contract.ImportTaskContractTestCase.test_batch_cancel_rejects_neither_id_nor_task_uid)
 取消时既没有 id 也没有 task_uid 应被拒绝。 ... ok
 test_batch_get_include_items_false (test_import_task_contract.ImportTaskContractTestCase.test_batch_get_include_items_false)
@@ -86,6 +89,8 @@ test_batch_submit_and_get_smoke (test_import_task_contract.ImportTaskContractTes
 提交批量任务并查询状态。 ... ok
 test_batch_submit_large_pdf (test_import_task_contract.ImportTaskContractTestCase.test_batch_submit_large_pdf)
 提交大文件 PDF（ Functional Analysis Notes.pdf）。 ... ok
+test_batch_submit_mixed_markdown_and_docx (test_import_task_contract.ImportTaskContractTestCase.test_batch_submit_mixed_markdown_and_docx)
+批量提交 Markdown 和 DOCX 混合任务。 ... ok
 test_batch_submit_rejects_empty_items (test_import_task_contract.ImportTaskContractTestCase.test_batch_submit_rejects_empty_items)
 items 为空列表时应被拒绝。 ... ok
 test_batch_submit_rejects_empty_title (test_import_task_contract.ImportTaskContractTestCase.test_batch_submit_rejects_empty_title)
@@ -223,7 +228,7 @@ test_search_rejects_empty_query (test_search_contract.SearchContractTestCase.tes
 test_search_rejects_invalid_alpha (test_search_contract.SearchContractTestCase.test_search_rejects_invalid_alpha) ... ok
 
 ----------------------------------------------------------------------
-Ran 114 tests in 185.287s
+Ran 118 tests in 314.712s
 
 OK
 ```

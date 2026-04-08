@@ -4,6 +4,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from knowledgebase.domain.document_types import (
+    is_supported_document_mime_type,
+    normalize_document_mime_type,
+    supported_document_mime_type_message,
+)
+
 
 def _strip_or_none(value: str | None) -> str | None:
     if value is None:
@@ -41,9 +47,10 @@ class DocumentImportInput(BaseModel):
     @field_validator("mime_type")
     @classmethod
     def validate_mime_type(cls, value: str) -> str:
-        if value != "application/pdf":
-            raise ValueError("仅支持 application/pdf")
-        return value
+        normalized = normalize_document_mime_type(value)
+        if not is_supported_document_mime_type(normalized):
+            raise ValueError(supported_document_mime_type_message())
+        return normalized
 
 
 class DocumentGetInput(BaseModel):
@@ -108,9 +115,12 @@ class DocumentUpdateInput(BaseModel):
     @field_validator("mime_type")
     @classmethod
     def validate_mime_type(cls, value: str | None) -> str | None:
-        if value is not None and value != "application/pdf":
-            raise ValueError("仅支持 application/pdf")
-        return value
+        if value is None:
+            return None
+        normalized = normalize_document_mime_type(value)
+        if not is_supported_document_mime_type(normalized):
+            raise ValueError(supported_document_mime_type_message())
+        return normalized
 
 
 class DocumentCategoryOutput(BaseModel):

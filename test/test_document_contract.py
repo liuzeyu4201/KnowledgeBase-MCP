@@ -42,6 +42,57 @@ class DocumentContractTestCase(MCPIntegrationTestCase):
 
         self.run_async(scenario())
 
+    def test_document_import_markdown_smoke(self) -> None:
+        async def scenario() -> None:
+            category = await self.create_category(prefix="document_markdown")
+            document = await self.import_document(
+                category_id=category["id"],
+                title_prefix="document_markdown",
+                file_name="notes.md",
+                mime_type="text/markdown",
+                file_content_base64=self.read_markdown_base64(title="Markdown Import"),
+            )
+            try:
+                self.assertEqual(document["mime_type"], "text/markdown")
+                self.assertEqual(document["source_type"], "md")
+                self.assertGreaterEqual(document["chunk_count"], 1)
+
+                get_payload = await self.tool("kb_document_get", id=document["id"])
+                self.assert_success(get_payload)
+                self.assertEqual(get_payload["data"]["document"]["source_type"], "md")
+            finally:
+                await self.delete_document_best_effort(document)
+                await self.delete_category_best_effort(category)
+
+        self.run_async(scenario())
+
+    def test_document_import_docx_smoke(self) -> None:
+        async def scenario() -> None:
+            category = await self.create_category(prefix="document_docx")
+            document = await self.import_document(
+                category_id=category["id"],
+                title_prefix="document_docx",
+                file_name="notes.docx",
+                mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                file_content_base64=self.read_docx_base64(title="Docx Import"),
+            )
+            try:
+                self.assertEqual(
+                    document["mime_type"],
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+                self.assertEqual(document["source_type"], "docx")
+                self.assertGreaterEqual(document["chunk_count"], 1)
+
+                get_payload = await self.tool("kb_document_get", id=document["id"])
+                self.assert_success(get_payload)
+                self.assertEqual(get_payload["data"]["document"]["source_type"], "docx")
+            finally:
+                await self.delete_document_best_effort(document)
+                await self.delete_category_best_effort(category)
+
+        self.run_async(scenario())
+
     def test_document_import_rejects_invalid_category(self) -> None:
         async def scenario() -> None:
             payload = await self.tool(
@@ -128,5 +179,34 @@ class DocumentContractTestCase(MCPIntegrationTestCase):
                 await self.delete_document_best_effort(document)
                 await self.delete_category_best_effort(source_category)
                 await self.delete_category_best_effort(target_category)
+
+        self.run_async(scenario())
+
+    def test_document_update_replace_markdown_with_docx(self) -> None:
+        async def scenario() -> None:
+            category = await self.create_category(prefix="document_update_replace")
+            document = await self.import_document(
+                category_id=category["id"],
+                title_prefix="update_replace",
+                file_name="replace.md",
+                mime_type="text/markdown",
+                file_content_base64=self.read_markdown_base64(title="Before Replace"),
+            )
+            try:
+                payload = await self.tool(
+                    "kb_document_update",
+                    id=document["id"],
+                    file_name="replace.docx",
+                    mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    file_content_base64=self.read_docx_base64(title="After Replace"),
+                )
+                self.assert_success(payload)
+                updated = payload["data"]["document"]
+                self.assertEqual(updated["mime_type"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                self.assertEqual(updated["source_type"], "docx")
+                self.assertEqual(updated["version"], 2)
+            finally:
+                await self.delete_document_best_effort(document)
+                await self.delete_category_best_effort(category)
 
         self.run_async(scenario())

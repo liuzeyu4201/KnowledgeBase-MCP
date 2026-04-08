@@ -61,7 +61,7 @@ def register_document_tools(mcp: Any) -> None:
         }
         return _execute_read(payload=payload, action="list")
 
-    @mcp.tool(name="kb_document_import", description="导入 PDF 文档并写入向量索引")
+    @mcp.tool(name="kb_document_import", description="导入文档并写入向量索引")
     def kb_document_import(
         category_id: int,
         title: str,
@@ -72,7 +72,7 @@ def register_document_tools(mcp: Any) -> None:
         operator: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """导入 PDF 文档并构建稠密向量与 BM25 索引。"""
+        """导入文档并构建稠密向量与 BM25 索引。"""
 
         payload = {
             "category_id": category_id,
@@ -105,7 +105,7 @@ def register_document_tools(mcp: Any) -> None:
         }
         return _execute_write(payload, action="delete")
 
-    @mcp.tool(name="kb_document_update", description="更新文档元数据，或整篇替换 PDF 并重建切片与向量")
+    @mcp.tool(name="kb_document_update", description="更新文档元数据，或整篇替换文档并重建切片与向量")
     def kb_document_update(
         id: int | None = None,
         document_uid: str | None = None,
@@ -118,7 +118,7 @@ def register_document_tools(mcp: Any) -> None:
         operator: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """更新文档，可仅修改元数据，也可替换 PDF 触发整篇重建。"""
+        """更新文档，可仅修改元数据，也可替换源文件触发整篇重建。"""
 
         payload = {
             "id": id,
