@@ -7,6 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from knowledgebase.db.session import session_scope
 from knowledgebase.domain.exceptions import AppError
+from knowledgebase.repositories.category_repository import CategoryRepository
 from knowledgebase.repositories.import_task_repository import ImportTaskRepository
 from knowledgebase.schemas.common import build_error_response, build_success_response
 from knowledgebase.services.import_task_service import ImportTaskService
@@ -82,7 +83,10 @@ def _execute_write(*, payload: dict[str, Any], action: str) -> dict[str, Any]:
 
     try:
         with session_scope() as session:
-            service = ImportTaskService(ImportTaskRepository(session))
+            service = ImportTaskService(
+                ImportTaskRepository(session),
+                category_repository=CategoryRepository(session),
+            )
             if action == "submit":
                 task = service.submit_task(payload)
             elif action == "cancel":
@@ -130,7 +134,10 @@ def _execute_read(*, payload: dict[str, Any]) -> dict[str, Any]:
 
     try:
         with session_scope() as session:
-            service = ImportTaskService(ImportTaskRepository(session))
+            service = ImportTaskService(
+                ImportTaskRepository(session),
+                category_repository=CategoryRepository(session),
+            )
             task = service.get_task(payload)
             return build_success_response(
                 data={"task": task.model_dump(mode="json")},

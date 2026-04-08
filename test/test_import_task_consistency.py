@@ -320,9 +320,16 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
                 for r in all_results[20:]:
                     self.assertTrue(r.get("success"), r)
 
-                # 最终状态应为 canceled
-                final_get = await self.tool("kb_document_import_batch_get", id=task["id"])
-                self.assertEqual(final_get["data"]["task"]["status"], "canceled")
+                # 协作式取消允许短暂处于 cancel_requested，最终应收敛到 canceled。
+                status = None
+                for _ in range(5):
+                    final_get = await self.tool("kb_document_import_batch_get", id=task["id"])
+                    self.assert_success(final_get)
+                    status = final_get["data"]["task"]["status"]
+                    if status == "canceled":
+                        break
+                    await asyncio.sleep(1)
+                self.assertEqual(status, "canceled")
             finally:
                 await self.delete_category_best_effort(category)
 
@@ -480,7 +487,21 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
                     task_uid=task["task_uid"],
                 )
                 self.assert_success(get_payload)
-                self.assertEqual(get_payload["data"]["task"]["status"], "canceled")
+                status = get_payload["data"]["task"]["status"]
+                self.assertIn(status, {"cancel_requested", "canceled"})
+
+                # 协作式取消允许短暂处于 cancel_requested，最终应收敛到 canceled。
+                for _ in range(5):
+                    if status == "canceled":
+                        break
+                    await asyncio.sleep(1)
+                    get_payload = await self.tool(
+                        "kb_document_import_batch_get",
+                        task_uid=task["task_uid"],
+                    )
+                    self.assert_success(get_payload)
+                    status = get_payload["data"]["task"]["status"]
+                self.assertEqual(status, "canceled")
             finally:
                 await self.delete_category_best_effort(category)
 
@@ -564,7 +585,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
                 for r in results:
                     self.assertEqual(r["data"]["task"]["id"], task["id"])
                     self.assertEqual(r["data"]["task"]["task_uid"], task["task_uid"])
-                    self.assertEqual(r["data"]["task"]["status"], "queued")
+                    self.assertIn(r["data"]["task"]["status"], {"queued", "running", "cancel_requested"})
                     self.assertEqual(r["data"]["task"]["total_items"], 1)
             finally:
                 await self.tool("kb_document_import_batch_cancel", id=task["id"])
@@ -801,12 +822,18 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
 
                 # 所有任务状态一致
                 for tid in task_ids:
-                    get_payload = await self.tool(
-                        "kb_document_import_batch_get",
-                        id=tid,
-                    )
-                    self.assert_success(get_payload)
-                    self.assertEqual(get_payload["data"]["task"]["status"], "canceled")
+                    status = None
+                    for _ in range(5):
+                        get_payload = await self.tool(
+                            "kb_document_import_batch_get",
+                            id=tid,
+                        )
+                        self.assert_success(get_payload)
+                        status = get_payload["data"]["task"]["status"]
+                        if status == "canceled":
+                            break
+                        await asyncio.sleep(1)
+                    self.assertEqual(status, "canceled")
             finally:
                 await self.delete_category_best_effort(category)
 

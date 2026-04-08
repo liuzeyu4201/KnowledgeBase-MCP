@@ -371,7 +371,7 @@ class ProductionEdgeCaseTestCase(MCPIntegrationTestCase):
                     asyncio.gather(*(cancel_task() for _ in range(5))),
                 )
 
-                for r in get_results[0]:
+                for r in get_results:
                     self.assertTrue(r.get("success"), r)
                 for r in cancel_results:
                     self.assertTrue(r.get("success"), r)

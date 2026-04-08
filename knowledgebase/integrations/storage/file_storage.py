@@ -48,7 +48,10 @@ class FileStorage:
     def save_pdf_bytes(self, *, file_name: str, file_bytes: bytes) -> tuple[str, bytes]:
         """保存已解码的 PDF 字节内容，供同步导入和后台任务复用。"""
 
-        safe_name = f"{uuid4().hex}_{Path(file_name).name}"
+        safe_name = self._build_internal_file_name(
+            prefix=uuid4().hex,
+            original_name=file_name,
+        )
         target = self.root / safe_name
         target.write_bytes(file_bytes)
         return str(target), file_bytes
@@ -66,7 +69,10 @@ class FileStorage:
         file_bytes = self.decode_base64_pdf(file_content_base64)
         task_dir = (self.task_root / task_uid).resolve()
         task_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = f"{item_no:06d}_{uuid4().hex}_{Path(file_name).name}"
+        safe_name = self._build_internal_file_name(
+            prefix=f"{item_no:06d}_{uuid4().hex}",
+            original_name=file_name,
+        )
         target = task_dir / safe_name
         target.write_bytes(file_bytes)
         return str(target), hashlib.sha256(file_bytes).hexdigest()
@@ -148,3 +154,15 @@ class FileStorage:
                 details={"file_path": file_path},
             ) from exc
         return target
+
+    def _build_internal_file_name(self, *, prefix: str, original_name: str) -> str:
+        """为内部存储生成受控文件名，避免宿主机文件名长度超限。"""
+
+        original_path = Path(original_name)
+        extension = original_path.suffix or ".pdf"
+        extension = extension[:16]
+        max_component_length = 240
+        reserved_length = len(prefix) + len(extension) + 2
+        available_stem_length = max(8, max_component_length - reserved_length)
+        normalized_stem = original_path.stem[:available_stem_length] or "document"
+        return f"{prefix}_{normalized_stem}{extension}"

@@ -162,6 +162,9 @@ class ImportTaskOutput(BaseModel):
         *,
         items: list[object] | None = None,
     ) -> "ImportTaskOutput":
+        sorted_items = None
+        if items is not None:
+            sorted_items = sorted(items, key=lambda item: (item.item_no, item.id))
         return cls(
             id=model.id,
             task_uid=model.task_uid,
@@ -188,5 +191,5 @@ class ImportTaskOutput(BaseModel):
             last_error=model.last_error,
             created_at=model.created_at,
             updated_at=model.updated_at,
-            items=[ImportTaskItemOutput.from_model(item) for item in items] if items is not None else None,
+            items=[ImportTaskItemOutput.from_model(item) for item in sorted_items] if sorted_items is not None else None,
         )

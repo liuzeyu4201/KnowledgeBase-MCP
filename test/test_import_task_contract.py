@@ -586,7 +586,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
     # -------------------------------------------------------------------------
 
     def test_concurrent_batch_submit_same_idempotency_key(self) -> None:
-        """并发提交相同 idempotency_key 的任务，只有一个成功。"""
+        """并发提交相同 idempotency_key 的任务，应收敛到同一任务。"""
 
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_concurrent_idem")
@@ -612,10 +612,12 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
                         )
 
                 results = await asyncio.gather(*(submit_once(i) for i in range(5)))
-                success_results = [r for r in results if r.get("success")]
-                self.assertEqual(len(success_results), 1, results)
+                for payload in results:
+                    self.assert_success(payload)
+                task_ids = {r["data"]["task"]["id"] for r in results}
+                self.assertEqual(len(task_ids), 1, results)
 
-                task_id = success_results[0]["data"]["task"]["id"]
+                task_id = next(iter(task_ids))
                 await self.tool("kb_document_import_batch_cancel", id=task_id)
             finally:
                 await self.delete_category_best_effort(category)

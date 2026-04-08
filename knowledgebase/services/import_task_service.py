@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 
 from knowledgebase.domain.exceptions import AppError
 from knowledgebase.integrations.storage.file_storage import FileStorage
+from knowledgebase.repositories.category_repository import CategoryRepository
 from knowledgebase.repositories.import_task_repository import ImportTaskRepository
 from knowledgebase.schemas.import_task import (
     ImportTaskCancelInput,
@@ -18,8 +20,14 @@ from knowledgebase.schemas.import_task import (
 class ImportTaskService:
     """批量文档导入任务服务。"""
 
-    def __init__(self, repository: ImportTaskRepository) -> None:
+    def __init__(
+        self,
+        repository: ImportTaskRepository,
+        *,
+        category_repository: CategoryRepository,
+    ) -> None:
         self.repository = repository
+        self.category_repository = category_repository
         self.storage = FileStorage()
         self._cleanup_after_commit_paths: list[str] = []
 
@@ -42,17 +50,30 @@ class ImportTaskService:
                 items = self.repository.list_items(existing.id)
                 return ImportTaskOutput.from_model(existing, items=items)
 
+        # 任务提交前先验证分类存在，避免无效任务进入队列后再失败。
+        self._validate_submit_categories(data)
+
         staged_file_paths: list[str] = []
         try:
-            task = self.repository.create_task(
-                priority=data.priority,
-                total_items=len(data.items),
-                request_id=data.request_id,
-                operator=data.operator,
-                trace_id=data.trace_id,
-                idempotency_key=data.idempotency_key,
-                max_attempts=data.max_attempts,
-            )
+            try:
+                task = self.repository.create_task(
+                    priority=data.priority,
+                    total_items=len(data.items),
+                    request_id=data.request_id,
+                    operator=data.operator,
+                    trace_id=data.trace_id,
+                    idempotency_key=data.idempotency_key,
+                    max_attempts=data.max_attempts,
+                )
+            except IntegrityError as exc:
+                if not data.idempotency_key:
+                    raise
+                self.repository.session.rollback()
+                existing = self.repository.get_by_idempotency_key(data.idempotency_key)
+                if existing is None:
+                    raise exc
+                items = self.repository.list_items(existing.id)
+                return ImportTaskOutput.from_model(existing, items=items)
 
             item_rows = []
             for index, item in enumerate(data.items, start=1):
@@ -79,7 +100,6 @@ class ImportTaskService:
                 )
 
             items = self.repository.create_items(item_rows)
-            task = self.repository.refresh_task_aggregate(task)
             return ImportTaskOutput.from_model(task, items=items)
         except Exception:
             # 任务提交失败时，主动清理已落盘的暂存文件，避免形成无主任务文件。
@@ -150,18 +170,19 @@ class ImportTaskService:
                 error_type="validation_error",
             )
 
-        task = None
-        if id is not None:
-            task = self.repository.get_by_id(id, include_items=include_items)
-        if task_uid is not None:
-            task_by_uid = self.repository.get_by_uid(task_uid, include_items=include_items)
-            if id is not None and task and task_by_uid and task.id != task_by_uid.id:
+        task_by_id = self.repository.get_by_id(id, include_items=include_items) if id is not None else None
+        task_by_uid = self.repository.get_by_uid(task_uid, include_items=include_items) if task_uid is not None else None
+
+        if id is not None and task_uid is not None:
+            if task_by_id is None or task_by_uid is None or task_by_id.id != task_by_uid.id:
                 raise AppError(
                     code="INVALID_ARGUMENT",
                     message="id and task_uid do not match",
                     error_type="validation_error",
                 )
-            task = task_by_uid or task
+            task = task_by_id
+        else:
+            task = task_by_id or task_by_uid
 
         if task is None:
             raise AppError(
@@ -194,3 +215,20 @@ class ImportTaskService:
             self.storage.delete_file(file_path)
             self._cleanup_task_dir_if_empty(file_path)
         self._cleanup_after_commit_paths = []
+
+    def _validate_submit_categories(self, data: ImportTaskSubmitInput) -> None:
+        """提交前同步校验全部分类，避免把必然失败的任务写入任务表。"""
+
+        checked_category_ids: set[int] = set()
+        for item in data.items:
+            if item.category_id in checked_category_ids:
+                continue
+            category = self.category_repository.get_by_id(item.category_id)
+            if category is None:
+                raise AppError(
+                    code="CATEGORY_NOT_FOUND",
+                    message="category not found",
+                    error_type="not_found",
+                    details={"category_id": item.category_id},
+                )
+            checked_category_ids.add(item.category_id)

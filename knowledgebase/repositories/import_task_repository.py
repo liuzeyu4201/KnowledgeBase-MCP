@@ -52,6 +52,7 @@ class ImportTaskRepository:
     ) -> ImportTaskModel:
         """创建任务主记录。"""
 
+        now = datetime.utcnow()
         task = ImportTaskModel(
             status="queued",
             priority=priority,
@@ -63,6 +64,8 @@ class ImportTaskRepository:
             pending_items=total_items,
             progress_percent=0,
             max_attempts=max_attempts,
+            created_at=now,
+            updated_at=now,
         )
         self.session.add(task)
         self.session.flush()
@@ -72,7 +75,15 @@ class ImportTaskRepository:
     def create_items(self, rows: list[dict]) -> list[ImportTaskItemModel]:
         """批量创建任务子项。"""
 
-        items = [ImportTaskItemModel(**row) for row in rows]
+        now = datetime.utcnow()
+        items = [
+            ImportTaskItemModel(
+                **row,
+                created_at=now,
+                updated_at=now,
+            )
+            for row in rows
+        ]
         self.session.add_all(items)
         self.session.flush()
         return items
