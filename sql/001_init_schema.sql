@@ -63,3 +63,69 @@ CREATE INDEX IF NOT EXISTS idx_kb_chunk_document_id ON kb_chunk (document_id);
 CREATE INDEX IF NOT EXISTS idx_kb_chunk_vector_status ON kb_chunk (vector_status, vector_version);
 CREATE INDEX IF NOT EXISTS idx_kb_chunk_content_hash ON kb_chunk (content_hash);
 CREATE INDEX IF NOT EXISTS idx_kb_chunk_deleted_at ON kb_chunk (deleted_at);
+
+CREATE TABLE IF NOT EXISTS kb_import_task (
+    id BIGSERIAL PRIMARY KEY,
+    task_uid VARCHAR(36) NOT NULL UNIQUE,
+    task_type VARCHAR(64) NOT NULL DEFAULT 'document_import_batch',
+    status VARCHAR(32) NOT NULL DEFAULT 'queued',
+    priority INT NOT NULL DEFAULT 50,
+    cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
+    idempotency_key VARCHAR(128) UNIQUE,
+    request_id VARCHAR(128),
+    operator VARCHAR(128),
+    trace_id VARCHAR(128),
+    total_items INT NOT NULL DEFAULT 0,
+    pending_items INT NOT NULL DEFAULT 0,
+    running_items INT NOT NULL DEFAULT 0,
+    success_items INT NOT NULL DEFAULT 0,
+    failed_items INT NOT NULL DEFAULT 0,
+    canceled_items INT NOT NULL DEFAULT 0,
+    progress_percent NUMERIC(5, 2) NOT NULL DEFAULT 0,
+    attempt_count INT NOT NULL DEFAULT 0,
+    max_attempts INT NOT NULL DEFAULT 3,
+    lease_token VARCHAR(64),
+    lease_expires_at TIMESTAMP,
+    heartbeat_at TIMESTAMP,
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    last_error TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_import_task_status_priority
+    ON kb_import_task (status, priority DESC, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_kb_import_task_cancel_requested ON kb_import_task (cancel_requested);
+CREATE INDEX IF NOT EXISTS idx_kb_import_task_lease_expires_at ON kb_import_task (lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_kb_import_task_request_id ON kb_import_task (request_id);
+
+CREATE TABLE IF NOT EXISTS kb_import_task_item (
+    id BIGSERIAL PRIMARY KEY,
+    task_id BIGINT NOT NULL REFERENCES kb_import_task(id),
+    item_no INT NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    priority INT NOT NULL DEFAULT 50,
+    category_id BIGINT NOT NULL,
+    title VARCHAR(256) NOT NULL,
+    file_name VARCHAR(256) NOT NULL,
+    mime_type VARCHAR(128) NOT NULL,
+    staged_file_uri VARCHAR(1024) NOT NULL,
+    file_sha256 VARCHAR(64),
+    document_id BIGINT,
+    document_uid VARCHAR(36),
+    attempt_count INT NOT NULL DEFAULT 0,
+    lease_token VARCHAR(64),
+    lease_expires_at TIMESTAMP,
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    last_error TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_kb_import_task_item_task_item_no UNIQUE (task_id, item_no)
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_import_task_item_status
+    ON kb_import_task_item (status, priority DESC, id ASC);
+CREATE INDEX IF NOT EXISTS idx_kb_import_task_item_task_id ON kb_import_task_item (task_id);
+CREATE INDEX IF NOT EXISTS idx_kb_import_task_item_document_id ON kb_import_task_item (document_id);

@@ -6,6 +6,7 @@ from knowledgebase.app.config import get_settings
 from knowledgebase.db.bootstrap import init_schema
 from knowledgebase.mcp.tools.category_tools import register_category_tools
 from knowledgebase.mcp.tools.document_tools import register_document_tools
+from knowledgebase.mcp.tools.import_task_tools import register_import_task_tools
 from knowledgebase.mcp.tools.search_tools import register_search_tools
 
 settings = get_settings()
@@ -18,6 +19,7 @@ mcp = FastMCP(
 
 register_category_tools(mcp)
 register_document_tools(mcp)
+register_import_task_tools(mcp)
 register_search_tools(mcp)
 
 

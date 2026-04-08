@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 knowledgebase = "knowledgebase.mcp.server:run"
+knowledgebase-worker = "knowledgebase.worker.import_worker:run"
 
 [build-system]
 requires = ["hatchling>=1.27.0"]

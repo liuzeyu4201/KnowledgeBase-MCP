@@ -32,6 +32,10 @@ class Settings:
     embedding_dimension: int
     chunk_size: int
     chunk_overlap: int
+    task_worker_poll_interval_seconds: float
+    task_worker_lease_seconds: int
+    task_worker_heartbeat_interval_seconds: float
+    task_worker_batch_size: int
 
 
 @lru_cache(maxsize=1)
@@ -91,4 +95,16 @@ def get_settings() -> Settings:
         embedding_dimension=int(os.getenv("KNOWLEDGEBASE_EMBEDDING_DIMENSION", "1024")),
         chunk_size=int(os.getenv("KNOWLEDGEBASE_CHUNK_SIZE", "800")),
         chunk_overlap=int(os.getenv("KNOWLEDGEBASE_CHUNK_OVERLAP", "100")),
+        task_worker_poll_interval_seconds=float(
+            os.getenv("KNOWLEDGEBASE_TASK_WORKER_POLL_INTERVAL_SECONDS", "1.0")
+        ),
+        task_worker_lease_seconds=int(
+            os.getenv("KNOWLEDGEBASE_TASK_WORKER_LEASE_SECONDS", "60")
+        ),
+        task_worker_heartbeat_interval_seconds=float(
+            os.getenv("KNOWLEDGEBASE_TASK_WORKER_HEARTBEAT_INTERVAL_SECONDS", "10.0")
+        ),
+        task_worker_batch_size=int(
+            os.getenv("KNOWLEDGEBASE_TASK_WORKER_BATCH_SIZE", "1")
+        ),
     )

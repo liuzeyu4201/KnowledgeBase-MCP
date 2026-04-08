@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from knowledgebase.db.base import Base
 from knowledgebase.db.session import engine
-from knowledgebase.models import chunk, document, category  # noqa: F401
+from knowledgebase.models import category, chunk, document, import_task  # noqa: F401
 
 
 def init_schema() -> None:

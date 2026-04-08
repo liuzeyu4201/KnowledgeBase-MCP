@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from base64 import b64decode
+import hashlib
 from pathlib import Path
 from uuid import uuid4
 
@@ -15,9 +16,17 @@ class FileStorage:
         settings = get_settings()
         self.root = Path(settings.storage_root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self.task_root = (self.root / "_tasks").resolve()
+        self.task_root.mkdir(parents=True, exist_ok=True)
 
     def save_pdf(self, *, file_name: str, file_content_base64: str) -> tuple[str, bytes]:
         """保存 PDF 原文件并返回文件路径与原始字节内容。"""
+
+        content = self.decode_base64_pdf(file_content_base64)
+        return self.save_pdf_bytes(file_name=file_name, file_bytes=content)
+
+    def decode_base64_pdf(self, file_content_base64: str) -> bytes:
+        """解码上传文件内容，并统一执行空内容校验。"""
 
         try:
             content = b64decode(file_content_base64, validate=True)
@@ -34,11 +43,39 @@ class FileStorage:
                 message="file content is empty",
                 error_type="validation_error",
             )
+        return content
+
+    def save_pdf_bytes(self, *, file_name: str, file_bytes: bytes) -> tuple[str, bytes]:
+        """保存已解码的 PDF 字节内容，供同步导入和后台任务复用。"""
 
         safe_name = f"{uuid4().hex}_{Path(file_name).name}"
         target = self.root / safe_name
-        target.write_bytes(content)
-        return str(target), content
+        target.write_bytes(file_bytes)
+        return str(target), file_bytes
+
+    def stage_task_pdf(
+        self,
+        *,
+        task_uid: str,
+        item_no: int,
+        file_name: str,
+        file_content_base64: str,
+    ) -> tuple[str, str]:
+        """把批量导入文件先落到任务暂存目录，避免把大文件直接塞进数据库。"""
+
+        file_bytes = self.decode_base64_pdf(file_content_base64)
+        task_dir = (self.task_root / task_uid).resolve()
+        task_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = f"{item_no:06d}_{uuid4().hex}_{Path(file_name).name}"
+        target = task_dir / safe_name
+        target.write_bytes(file_bytes)
+        return str(target), hashlib.sha256(file_bytes).hexdigest()
+
+    def read_file_bytes(self, file_path: str) -> bytes:
+        """读取任务暂存文件，用于后台 worker 真正执行导入。"""
+
+        target = self._ensure_within_storage_root(file_path)
+        return target.read_bytes()
 
     def delete_file(self, file_path: str | None) -> None:
         """删除本地存储文件，作为导入失败时的补偿动作。"""
@@ -46,16 +83,7 @@ class FileStorage:
         if not file_path:
             return
 
-        target = Path(file_path).resolve()
-        try:
-            target.relative_to(self.root)
-        except ValueError as exc:
-            raise AppError(
-                code="CONSISTENCY_ROLLBACK_FAILED",
-                message="storage rollback path is out of root",
-                error_type="system_error",
-                details={"file_path": file_path},
-            ) from exc
+        target = self._ensure_within_storage_root(file_path)
 
         if target.exists():
             target.unlink()
@@ -66,16 +94,7 @@ class FileStorage:
         if not file_path:
             return None, None
 
-        target = Path(file_path).resolve()
-        try:
-            target.relative_to(self.root)
-        except ValueError as exc:
-            raise AppError(
-                code="DELETE_FILE_STAGE_FAILED",
-                message="storage delete path is out of root",
-                error_type="system_error",
-                details={"file_path": file_path},
-            ) from exc
+        target = self._ensure_within_storage_root(file_path, error_code="DELETE_FILE_STAGE_FAILED")
 
         if not target.exists():
             return str(target), None
@@ -109,3 +128,23 @@ class FileStorage:
         staged = Path(staged_path).resolve()
         if staged.exists():
             staged.unlink()
+
+    def _ensure_within_storage_root(
+        self,
+        file_path: str,
+        *,
+        error_code: str = "CONSISTENCY_ROLLBACK_FAILED",
+    ) -> Path:
+        """校验目标文件必须位于受控存储根目录内，避免误删宿主机其他文件。"""
+
+        target = Path(file_path).resolve()
+        try:
+            target.relative_to(self.root)
+        except ValueError as exc:
+            raise AppError(
+                code=error_code,
+                message="storage path is out of root",
+                error_type="system_error",
+                details={"file_path": file_path},
+            ) from exc
+        return target

@@ -26,6 +26,28 @@ services:
       - "${APP_PORT:-8000}:8000"
     restart: unless-stopped
 
+  worker:
+    build:
+      context: .
+      target: dev
+    container_name: knowledgebase-worker-dev
+    env_file:
+      - .env.dev
+    environment:
+      KNOWLEDGEBASE_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      KNOWLEDGEBASE_MILVUS_HOST: milvus
+      KNOWLEDGEBASE_MILVUS_PORT: 19530
+      KNOWLEDGEBASE_AUTO_INIT_SCHEMA: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      milvus:
+        condition: service_started
+    volumes:
+      - .:/app
+    command: ["sh", "-c", "uv sync --no-dev && python -m knowledgebase.worker.import_worker"]
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     container_name: knowledgebase-postgres-dev

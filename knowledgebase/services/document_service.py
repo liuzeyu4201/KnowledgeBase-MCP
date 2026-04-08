@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Callable
 from dataclasses import dataclass, field
 
 from pydantic import ValidationError
@@ -92,116 +93,40 @@ class DocumentService:
                 details={"errors": exc.errors()},
             ) from exc
 
-        category = self.category_repository.get_by_id(data.category_id)
-        if category is None:
-            raise AppError(
-                code="CATEGORY_NOT_FOUND",
-                message="category not found",
-                error_type="not_found",
-                details={"category_id": data.category_id},
-            )
-
-        storage_uri, file_bytes = self.storage.save_pdf(
-            file_name=data.file_name,
-            file_content_base64=data.file_content_base64,
-        )
-        self._compensation_context.storage_uri = storage_uri
-        file_sha256 = hashlib.sha256(file_bytes).hexdigest()
-
-        document = self.document_repository.create(
-            category_id=data.category_id,
-            title=data.title,
-            file_name=data.file_name,
-            storage_uri=storage_uri,
-            mime_type=data.mime_type,
-            file_size=len(file_bytes),
-            file_sha256=file_sha256,
-            parse_status="processing",
-            vector_status="indexing",
+        file_bytes = self.storage.decode_base64_pdf(data.file_content_base64)
+        return self._import_document_from_bytes(
+            data=data,
+            file_bytes=file_bytes,
+            cancellation_checker=None,
         )
 
+    def import_document_from_bytes(
+        self,
+        payload: dict,
+        *,
+        file_bytes: bytes,
+        cancellation_checker: Callable[[], bool] | None = None,
+    ) -> dict:
+        """供后台任务复用的导入入口，直接消费已暂存文件字节内容。"""
+
+        self._compensation_context = ImportCompensationContext()
         try:
-            pages = self.parser.parse(file_bytes)
-            chunk_payloads = self.chunker.chunk_pages(pages)
-            if not chunk_payloads:
-                raise AppError(
-                    code="DOCUMENT_PARSE_FAILED",
-                    message="no chunks generated from document",
-                    error_type="system_error",
-                )
-
-            dense_vectors = self.embedder.embed_texts([item.content for item in chunk_payloads])
-            chunk_rows = []
-            for item in chunk_payloads:
-                chunk_rows.append(
-                    {
-                        "document_id": document.id,
-                        "chunk_no": item.chunk_no,
-                        "page_no": item.page_no,
-                        "char_start": item.char_start,
-                        "char_end": item.char_end,
-                        "token_count": item.token_count,
-                        "content": item.content,
-                        "content_hash": hashlib.sha256(item.content.encode("utf-8")).hexdigest(),
-                        "embedding_model": self._embedding_model_name(),
-                        "vector_version": 1,
-                        "vector_status": "ready",
-                        "metadata_json": {"page_no": item.page_no},
-                    }
-                )
-
-            chunks = self.chunk_repository.create_many(chunk_rows)
-            self._compensation_context.milvus_chunk_ids = [chunk.id for chunk in chunks]
-
-            milvus_rows = []
-            for chunk, dense_vector in zip(chunks, dense_vectors, strict=True):
-                milvus_rows.append(
-                    {
-                        "chunk_id": chunk.id,
-                        "document_id": document.id,
-                        "category_id": document.category_id,
-                        "chunk_no": chunk.chunk_no,
-                        "page_no": chunk.page_no or 0,
-                        "content": chunk.content,
-                        "dense_vector": dense_vector,
-                    }
-                )
-
-            self.milvus.insert_chunks(milvus_rows)
-            self._compensation_context.milvus_inserted = True
-
-            document = self.document_repository.update_status(
-                document,
-                parse_status="success",
-                vector_status="ready",
-                chunk_count=len(chunks),
-                last_error=None,
-            )
-        except Exception as exc:  # noqa: BLE001
-            rollback_error = self.rollback_import_side_effects(original_error=exc)
-            if rollback_error is not None:
-                raise rollback_error from exc
-            if isinstance(exc, AppError):
-                raise
+            normalized_payload = dict(payload)
+            normalized_payload.setdefault("file_content_base64", "staged-file")
+            data = DocumentImportInput.model_validate(normalized_payload)
+        except ValidationError as exc:
             raise AppError(
-                code="DOCUMENT_IMPORT_FAILED",
-                message="document import failed",
-                error_type="system_error",
-                details={"error": str(exc)},
+                code="INVALID_ARGUMENT",
+                message="文档导入参数不合法",
+                error_type="validation_error",
+                details={"errors": exc.errors()},
             ) from exc
 
-        return {
-            "document": DocumentOutput.from_model(document).model_dump(mode="json"),
-            "chunks": {
-                "count": document.chunk_count,
-            },
-            "vector_store": {
-                "provider": "milvus",
-                "collection_name": self.milvus.collection_name,
-                "dense_model": self._embedding_model_name(),
-                "sparse_strategy": "milvus_bm25",
-            },
-        }
+        return self._import_document_from_bytes(
+            data=data,
+            file_bytes=file_bytes,
+            cancellation_checker=cancellation_checker,
+        )
 
     def get_document(self, payload: dict) -> DocumentOutput:
         """按主键或文档业务标识查询单个文档详情。"""
@@ -718,3 +643,145 @@ class DocumentService:
         """返回当前向量模型名。"""
 
         return getattr(self.embedder, "model", "mock-embedding")
+
+    def _import_document_from_bytes(
+        self,
+        *,
+        data: DocumentImportInput,
+        file_bytes: bytes,
+        cancellation_checker: Callable[[], bool] | None,
+    ) -> dict:
+        """执行真正的文档导入流程，支持同步导入和后台任务复用。"""
+
+        category = self.category_repository.get_by_id(data.category_id)
+        if category is None:
+            raise AppError(
+                code="CATEGORY_NOT_FOUND",
+                message="category not found",
+                error_type="not_found",
+                details={"category_id": data.category_id},
+            )
+
+        self._check_cooperative_cancellation(cancellation_checker)
+        storage_uri, saved_file_bytes = self.storage.save_pdf_bytes(
+            file_name=data.file_name,
+            file_bytes=file_bytes,
+        )
+        self._compensation_context.storage_uri = storage_uri
+        file_sha256 = hashlib.sha256(saved_file_bytes).hexdigest()
+
+        document = self.document_repository.create(
+            category_id=data.category_id,
+            title=data.title,
+            file_name=data.file_name,
+            storage_uri=storage_uri,
+            mime_type=data.mime_type,
+            file_size=len(saved_file_bytes),
+            file_sha256=file_sha256,
+            parse_status="processing",
+            vector_status="indexing",
+        )
+
+        try:
+            self._check_cooperative_cancellation(cancellation_checker)
+            pages = self.parser.parse(saved_file_bytes)
+
+            self._check_cooperative_cancellation(cancellation_checker)
+            chunk_payloads = self.chunker.chunk_pages(pages)
+            if not chunk_payloads:
+                raise AppError(
+                    code="DOCUMENT_PARSE_FAILED",
+                    message="no chunks generated from document",
+                    error_type="system_error",
+                )
+
+            self._check_cooperative_cancellation(cancellation_checker)
+            dense_vectors = self.embedder.embed_texts([item.content for item in chunk_payloads])
+
+            chunk_rows = []
+            for item in chunk_payloads:
+                chunk_rows.append(
+                    {
+                        "document_id": document.id,
+                        "chunk_no": item.chunk_no,
+                        "page_no": item.page_no,
+                        "char_start": item.char_start,
+                        "char_end": item.char_end,
+                        "token_count": item.token_count,
+                        "content": item.content,
+                        "content_hash": hashlib.sha256(item.content.encode("utf-8")).hexdigest(),
+                        "embedding_model": self._embedding_model_name(),
+                        "vector_version": 1,
+                        "vector_status": "ready",
+                        "metadata_json": {"page_no": item.page_no},
+                    }
+                )
+
+            chunks = self.chunk_repository.create_many(chunk_rows)
+            self._compensation_context.milvus_chunk_ids = [chunk.id for chunk in chunks]
+
+            milvus_rows = []
+            for chunk, dense_vector in zip(chunks, dense_vectors, strict=True):
+                milvus_rows.append(
+                    {
+                        "chunk_id": chunk.id,
+                        "document_id": document.id,
+                        "category_id": document.category_id,
+                        "chunk_no": chunk.chunk_no,
+                        "page_no": chunk.page_no or 0,
+                        "content": chunk.content,
+                        "dense_vector": dense_vector,
+                    }
+                )
+
+            self._check_cooperative_cancellation(cancellation_checker)
+            self.milvus.insert_chunks(milvus_rows)
+            self._compensation_context.milvus_inserted = True
+
+            document = self.document_repository.update_status(
+                document,
+                parse_status="success",
+                vector_status="ready",
+                chunk_count=len(chunks),
+                last_error=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            rollback_error = self.rollback_import_side_effects(original_error=exc)
+            if rollback_error is not None:
+                raise rollback_error from exc
+            if isinstance(exc, AppError):
+                raise
+            raise AppError(
+                code="DOCUMENT_IMPORT_FAILED",
+                message="document import failed",
+                error_type="system_error",
+                details={"error": str(exc)},
+            ) from exc
+
+        return {
+            "document": DocumentOutput.from_model(document).model_dump(mode="json"),
+            "chunks": {
+                "count": document.chunk_count,
+            },
+            "vector_store": {
+                "provider": "milvus",
+                "collection_name": self.milvus.collection_name,
+                "dense_model": self._embedding_model_name(),
+                "sparse_strategy": "milvus_bm25",
+            },
+        }
+
+    def _check_cooperative_cancellation(
+        self,
+        cancellation_checker: Callable[[], bool] | None,
+    ) -> None:
+        """在关键阶段检查是否收到取消信号，实现协作式取消。"""
+
+        if cancellation_checker is None:
+            return
+        if cancellation_checker():
+            raise AppError(
+                code="TASK_CANCELED",
+                message="task canceled cooperatively",
+                error_type="business_error",
+            )
