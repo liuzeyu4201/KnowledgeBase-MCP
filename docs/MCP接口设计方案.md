@@ -11,18 +11,12 @@
 - `kb_category_list`
 - `kb_category_update`
 - `kb_category_delete`
-- `kb_document_import`
-- `kb_document_import_batch_submit`
 - `kb_document_import_batch_cancel`
 - `kb_document_import_batch_get`
 - `kb_document_get`
 - `kb_document_list`
-- `kb_document_update`
 - `kb_document_delete`
 - `kb_search_retrieve`
-
-已确认并将作为远端标准路径推进的接口：
-
 - 非 MCP 上传接口：`POST /api/staged-files`
 - 非 MCP 查询接口：`GET /api/staged-files/{staged_file_id}`
 - 非 MCP 列表接口：`GET /api/staged-files`
@@ -47,7 +41,7 @@
 示例：
 
 - `kb_category_create`
-- `kb_document_import`
+- `kb_document_import_from_staged`
 - `kb_search_retrieve`
 
 ---
@@ -188,8 +182,6 @@
 | `STAGED_FILE_UPLOAD_FAILED` | `system_error` | 文件上传或落存失败 |
 
 说明：
-
-- `file_content_base64` 非法时，当前返回 `INVALID_ARGUMENT`
 - `mime_type` 不在受支持类型集合中时，当前返回 `INVALID_ARGUMENT`
 
 ### 2.5.4 批量导入任务相关错误码
@@ -230,16 +222,13 @@
 |---|---|
 | `category_id` | 正整数，且分类必须存在 |
 | `title` | `1~256` 字符 |
-| `file_name` | `1~256` 字符 |
-| `mime_type` | 当前支持 `application/pdf`、`application/vnd.openxmlformats-officedocument.wordprocessingml.document`、`text/markdown`、`text/x-markdown` |
-| `file_content_base64` | 兼容路径下必填时必须能被正确解码且内容非空 |
+| `staged_file_id` | 正整数，且对应暂存文件必须存在且可消费 |
 | `document_uid` | `1~36` 字符 |
 
 补充说明：
 
-- 当前代码仍保留 `file_content_base64` 兼容路径
-- 远端标准路径应改为“先上传暂存文件，再通过 `from_staged` 接口导入”
-- 更新文档时，如果传 `file_content_base64`，则 `file_name` 和 `mime_type` 必须同时传入
+- 正式导入前必须先通过上传接口获得 `staged_file_id`
+- 更新文档时，若要替换源文件，也必须先上传新文件再传 `staged_file_id`
 
 ---
 
@@ -270,15 +259,12 @@
 | `items` | 至少 `1` 条，最多 `100` 条 |
 | `items[].category_id` | 正整数 |
 | `items[].title` | `1~256` 字符 |
-| `items[].file_name` | `1~256` 字符 |
-| `items[].mime_type` | 当前支持 `application/pdf`、`application/vnd.openxmlformats-officedocument.wordprocessingml.document`、`text/markdown`、`text/x-markdown` |
-| `items[].file_content_base64` | 当前兼容路径下必填，必须可正确解码 |
+| `items[].staged_file_id` | 正整数，且对应暂存文件必须存在且可消费 |
 | `items[].priority` | 可选，`0~1000` |
 
 补充说明：
 
-- 当前批量导入接口先将文件写入任务暂存目录，不直接把大体积文件内容持久化到数据库
-- 远端标准路径应改为 `items[].staged_file_id`
+- 批量任务只引用已上传的暂存文件，不再直接承载文件内容
 - 任务查询默认返回子任务明细，除非显式指定 `include_items=false`
 
 ---
@@ -317,10 +303,10 @@
 - 上传接口负责接收文件、落存、创建暂存文件记录
 - MCP Tool 负责知识库业务动作，不负责文件传输
 
-兼容策略：
+当前约束：
 
-- 当前已实现的 `file_content_base64` 路径保留，用于小文件兼容与内部调用
 - 面向远端 Agent 的标准接入路径统一收敛到 `staged_file_id`
+- MCP Tool 不再暴露直接接收大文件 `base64` 的导入接口
 
 ---
 
@@ -796,117 +782,6 @@
 
 ---
 
-### 4.3.4 `kb_document_import`
-
-用途：
-
-- 兼容路径：直接通过 `file_content_base64` 导入单个文档
-- 该接口适合小文件，不作为远端标准路径
-
-输入参数：
-
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| `category_id` | `integer` | 是 | 分类 ID |
-| `title` | `string` | 是 | 文档标题 |
-| `file_name` | `string` | 是 | 文件名 |
-| `mime_type` | `string` | 是 | 当前支持 `pdf/docx/md` 对应 MIME |
-| `file_content_base64` | `string` | 是 | 文档内容 Base64 |
-| `request_id` | `string` | 否 | 请求标识 |
-| `operator` | `string` | 否 | 操作主体 |
-| `trace_id` | `string` | 否 | 链路追踪 |
-
-执行语义：
-
-- 校验分类存在
-- 保存原始文件
-- 创建文档记录
-- 按 `mime_type` 解析文件
-- 切片并写入 `kb_chunk`
-- 生成稠密向量
-- 写入 Milvus
-- 由 Milvus 自动生成 BM25 稀疏索引
-- 更新文档状态为 `success/ready`
-
-成功返回：
-
-- `data.document`
-- `data.chunks.count`
-- `data.vector_store`
-
-`vector_store` 当前固定返回：
-
-- `provider=milvus`
-- `collection_name`
-- `dense_model`
-- `sparse_strategy=milvus_bm25`
-
-主要错误码：
-
-- `INVALID_ARGUMENT`
-- `CATEGORY_NOT_FOUND`
-- `DOCUMENT_PARSE_FAILED`
-- `DOCUMENT_IMPORT_FAILED`
-- `CONSISTENCY_ROLLBACK_FAILED`
-
----
-
-### 4.3.5 `kb_document_import_batch_submit`
-
-用途：
-
-- 提交批量文档导入异步任务
-
-输入参数：
-
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| `items` | `array<object>` | 是 | 批量导入子项 |
-| `priority` | `integer` | 否 | 任务优先级，默认 `50` |
-| `max_attempts` | `integer` | 否 | 最大尝试次数，默认 `3` |
-| `idempotency_key` | `string` | 否 | 幂等键 |
-| `request_id` | `string` | 否 | 请求标识 |
-| `operator` | `string` | 否 | 操作主体 |
-| `trace_id` | `string` | 否 | 链路追踪 |
-
-`items[]` 字段：
-
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| `category_id` | `integer` | 是 | 分类 ID |
-| `title` | `string` | 是 | 文档标题 |
-| `file_name` | `string` | 是 | 文件名 |
-| `mime_type` | `string` | 是 | 当前支持 `pdf/docx/md` 对应 MIME |
-| `file_content_base64` | `string` | 是 | 文档内容 Base64 |
-| `priority` | `integer` | 否 | 子任务优先级，默认继承主任务优先级 |
-
-执行语义：
-
-- 校验批量任务参数
-- 若传入 `idempotency_key` 且已有同键任务，则直接返回已有任务
-- 先将每个文件写入任务暂存目录
-- 在数据库中创建主任务和子任务记录
-- 返回任务主状态与子任务明细
-- 实际导入由后台 worker 异步执行
-
-成功返回：
-
-- `data.task`
-
-`task` 当前包含：
-
-- 任务基础信息
-- 聚合进度字段
-- `items` 子任务列表
-
-主要错误码：
-
-- `INVALID_ARGUMENT`
-- `DB_ERROR`
-- `INTERNAL_ERROR`
-
----
-
 ### 4.3.6 `kb_document_import_batch_cancel`
 
 用途：
@@ -1067,47 +942,6 @@
 
 ---
 
-### 4.3.10 `kb_document_update`
-
-用途：
-
-- 更新文档元数据
-- 或整篇替换源文件并重建切片与向量
-
-输入参数：
-
-| 字段名 | 类型 | 必填 | 说明 |
-|---|---|---:|---|
-| `id` | `integer` | 否 | 文档主键 |
-| `document_uid` | `string` | 否 | 文档稳定标识 |
-| `category_id` | `integer` | 否 | 新分类 ID |
-| `title` | `string` | 否 | 新标题 |
-| `file_name` | `string` | 否 | 新文件名 |
-| `mime_type` | `string` | 否 | 当前支持 `pdf/docx/md` 对应 MIME |
-| `file_content_base64` | `string` | 否 | 新文件内容 |
-| `request_id` | `string` | 否 | 请求标识 |
-| `operator` | `string` | 否 | 操作主体 |
-| `trace_id` | `string` | 否 | 链路追踪 |
-
-执行语义：
-
-- `id` 和 `document_uid` 至少传一个
-- 至少需要一个更新字段
-- 只更新元数据时，仅更新 `category_id`、`title`
-- 如果传 `file_content_base64`，则必须同时传 `file_name` 和 `mime_type`
-- 替换源文件时采用整篇重建
-- 成功后文档 `version + 1`
-
-成功返回：
-
-- `data.document`
-- `data.chunks.count`
-- `data.vector_store`
-
-主要错误码：
-
-- `INVALID_ARGUMENT`
-- `DOCUMENT_NOT_FOUND`
 - `CATEGORY_NOT_FOUND`
 - `DOCUMENT_PARSE_FAILED`
 - `DOCUMENT_UPDATE_FAILED`

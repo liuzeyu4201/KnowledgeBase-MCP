@@ -24,7 +24,6 @@ from knowledgebase.schemas.document import (
     DocumentImportFromStagedInput,
     DocumentListInput,
     DocumentOutput,
-    DocumentUpdateInput,
     DocumentUpdateFromStagedInput,
 )
 
@@ -85,55 +84,6 @@ class DocumentService:
         self._delete_compensation_context: DeleteCompensationContext | None = None
         self._update_compensation_context: UpdateCompensationContext | None = None
         self._post_commit_cleanup_paths: list[str] = []
-
-    def import_document(self, payload: dict) -> dict:
-        """导入文档、创建切片，并写入 Milvus 稠密向量和 BM25 索引。"""
-
-        self._compensation_context = ImportCompensationContext()
-        try:
-            data = DocumentImportInput.model_validate(payload)
-        except ValidationError as exc:
-            raise AppError(
-                code="INVALID_ARGUMENT",
-                message="文档导入参数不合法",
-                error_type="validation_error",
-                details={"errors": exc.errors()},
-            ) from exc
-
-        file_bytes = self.storage.decode_base64_file(data.file_content_base64)
-        return self._import_document_from_bytes(
-            data=data,
-            file_bytes=file_bytes,
-            cancellation_checker=None,
-        )
-
-    def import_document_from_bytes(
-        self,
-        payload: dict,
-        *,
-        file_bytes: bytes,
-        cancellation_checker: Callable[[], bool] | None = None,
-    ) -> dict:
-        """供后台任务复用的导入入口，直接消费已暂存文件字节内容。"""
-
-        self._compensation_context = ImportCompensationContext()
-        try:
-            normalized_payload = dict(payload)
-            normalized_payload.setdefault("file_content_base64", "staged-file")
-            data = DocumentImportInput.model_validate(normalized_payload)
-        except ValidationError as exc:
-            raise AppError(
-                code="INVALID_ARGUMENT",
-                message="文档导入参数不合法",
-                error_type="validation_error",
-                details={"errors": exc.errors()},
-            ) from exc
-
-        return self._import_document_from_bytes(
-            data=data,
-            file_bytes=file_bytes,
-            cancellation_checker=cancellation_checker,
-        )
 
     def import_document_from_staged(
         self,
@@ -277,54 +227,6 @@ class DocumentService:
             "document_uid": document.document_uid,
             "chunk_count": len(chunks),
         }
-
-    def update_document(self, payload: dict) -> dict:
-        """更新文档元数据，或以整篇重建方式替换文档、切片和向量。"""
-
-        try:
-            data = DocumentUpdateInput.model_validate(payload)
-        except ValidationError as exc:
-            raise AppError(
-                code="INVALID_ARGUMENT",
-                message="文档更新参数不合法",
-                error_type="validation_error",
-                details={"errors": exc.errors()},
-            ) from exc
-
-        document = self._resolve_document(id=data.id, document_uid=data.document_uid)
-        self._ensure_update_fields_present(data)
-
-        if data.category_id is not None:
-            category = self.category_repository.get_by_id(data.category_id)
-            if category is None:
-                raise AppError(
-                    code="CATEGORY_NOT_FOUND",
-                    message="category not found",
-                    error_type="not_found",
-                    details={"category_id": data.category_id},
-                )
-
-        has_file_update = data.file_content_base64 is not None
-        self._ensure_file_update_fields(data, has_file_update=has_file_update)
-
-        if not has_file_update:
-            return self._build_document_write_result(
-                self.document_repository.update_document(
-                    document,
-                    category_id=data.category_id,
-                    title=data.title,
-                )
-            )
-
-        file_bytes = self.storage.decode_base64_file(data.file_content_base64)
-        return self._update_document_with_file_bytes(
-            document=document,
-            category_id=data.category_id,
-            title=data.title,
-            file_name=data.file_name,
-            mime_type=data.mime_type,
-            file_bytes=file_bytes,
-        )
 
     def update_document_from_staged(self, payload: dict) -> dict:
         """使用暂存文件替换文档源文件并执行整篇重建。"""
@@ -590,22 +492,6 @@ class DocumentService:
 
         return document
 
-    def _ensure_update_fields_present(self, data: DocumentUpdateInput) -> None:
-        """确保更新请求至少包含一个实际变更字段。"""
-
-        if (
-            data.category_id is None
-            and data.title is None
-            and data.file_name is None
-            and data.mime_type is None
-            and data.file_content_base64 is None
-        ):
-            raise AppError(
-                code="INVALID_ARGUMENT",
-                message="at least one update field is required",
-                error_type="validation_error",
-            )
-
     def _ensure_update_from_staged_fields_present(self, data: DocumentUpdateFromStagedInput) -> None:
         """确保 from_staged 更新请求至少包含一个实际变更字段。"""
 
@@ -613,30 +499,6 @@ class DocumentService:
             raise AppError(
                 code="INVALID_ARGUMENT",
                 message="at least one update field is required",
-                error_type="validation_error",
-            )
-
-    def _ensure_file_update_fields(
-        self,
-        data: DocumentUpdateInput,
-        *,
-        has_file_update: bool,
-    ) -> None:
-        """校验文件替换场景下的必填字段组合。"""
-
-        if not has_file_update:
-            if data.file_name is not None or data.mime_type is not None:
-                raise AppError(
-                    code="INVALID_ARGUMENT",
-                    message="file_name and mime_type require file_content_base64",
-                    error_type="validation_error",
-                )
-            return
-
-        if data.file_name is None or data.mime_type is None:
-            raise AppError(
-                code="INVALID_ARGUMENT",
-                message="file_name, mime_type and file_content_base64 are required together",
                 error_type="validation_error",
             )
 

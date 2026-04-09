@@ -20,8 +20,8 @@ def register_document_tools(mcp: Any) -> None:
 
     文档 Tool 负责知识文档主实体的 CRUD。
     其中：
-    - `kb_document_import` / `kb_document_update` 兼容直接传 base64 内容
-    - `*_from_staged` 是远端标准路径，推荐 Agent 优先使用
+    - `*_from_staged` 是远端标准路径，推荐 Agent 始终优先使用
+    - 直接 base64 直传的旧 Tool 已移除，避免远端大文件场景误用
     """
 
     @mcp.tool(
@@ -85,40 +85,6 @@ def register_document_tools(mcp: Any) -> None:
         return _execute_read(payload=payload, action="list")
 
     @mcp.tool(
-        name="kb_document_import",
-        description="兼容路径：直接传文件 base64 导入文档并写入向量索引。远端大文件场景不推荐优先使用。",
-    )
-    def kb_document_import(
-        category_id: int,
-        title: str,
-        file_name: str,
-        mime_type: str,
-        file_content_base64: str,
-        request_id: str | None = None,
-        operator: str | None = None,
-        trace_id: str | None = None,
-    ) -> dict[str, Any]:
-        """导入文档并构建稠密向量与 BM25 索引。
-
-        Agent 使用建议：
-        - 只适合小文件或兼容场景
-        - `mime_type` 必须和文件类型匹配
-        - 返回结果中会包含导入后的 `document`
-        """
-
-        payload = {
-            "category_id": category_id,
-            "title": title,
-            "file_name": file_name,
-            "mime_type": mime_type,
-            "file_content_base64": file_content_base64,
-            "request_id": request_id,
-            "operator": operator,
-            "trace_id": trace_id,
-        }
-        return _execute_write(payload)
-
-    @mcp.tool(
         name="kb_document_import_from_staged",
         description="标准远端路径：引用 staged_file 导入文档并写入向量索引。",
     )
@@ -174,43 +140,6 @@ def register_document_tools(mcp: Any) -> None:
             "trace_id": trace_id,
         }
         return _execute_write(payload, action="delete")
-
-    @mcp.tool(
-        name="kb_document_update",
-        description="兼容路径：更新文档元数据，或整篇替换 base64 文件并重建切片与向量。",
-    )
-    def kb_document_update(
-        id: int | None = None,
-        document_uid: str | None = None,
-        category_id: int | None = None,
-        title: str | None = None,
-        file_name: str | None = None,
-        mime_type: str | None = None,
-        file_content_base64: str | None = None,
-        request_id: str | None = None,
-        operator: str | None = None,
-        trace_id: str | None = None,
-    ) -> dict[str, Any]:
-        """更新文档，可仅修改元数据，也可替换源文件触发整篇重建。
-
-        Agent 使用建议：
-        - 只改标题/分类时，无需传文件字段
-        - 需要替换文档内容时，必须同时传文件相关字段
-        """
-
-        payload = {
-            "id": id,
-            "document_uid": document_uid,
-            "category_id": category_id,
-            "title": title,
-            "file_name": file_name,
-            "mime_type": mime_type,
-            "file_content_base64": file_content_base64,
-            "request_id": request_id,
-            "operator": operator,
-            "trace_id": trace_id,
-        }
-        return _execute_write(payload, action="update")
 
     @mcp.tool(
         name="kb_document_update_from_staged",
@@ -324,12 +253,8 @@ def _execute_write(payload: dict[str, Any], action: str = "import") -> dict[str,
         staged_file_repository=StagedFileRepository(session),
     )
     try:
-        if action == "import":
-            result = service.import_document(payload)
-        elif action == "import_from_staged":
+        if action == "import_from_staged":
             result = service.import_document_from_staged(payload)
-        elif action == "update":
-            result = service.update_document(payload)
         elif action == "update_from_staged":
             result = service.update_document_from_staged(payload)
         elif action == "delete":

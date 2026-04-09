@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 from io import BytesIO
 import os
 import time
@@ -38,7 +39,7 @@ class MCPIntegrationTestCase(unittest.TestCase):
         return f"{int(time.time() * 1000)}_{id(self)}"
 
     def read_pdf_base64(self, *, large: bool = False) -> str:
-        """读取测试 PDF 并编码为 base64，直接用于文档导入接口。"""
+        """读取测试 PDF 并编码为 base64。"""
 
         pdf_path = self.large_pdf_path if large else self.small_pdf_path
         return base64.b64encode(pdf_path.read_bytes()).decode("utf-8")
@@ -170,21 +171,127 @@ class MCPIntegrationTestCase(unittest.TestCase):
         mime_type: str = "application/pdf",
         file_content_base64: str | None = None,
     ) -> dict[str, Any]:
-        """导入测试文档并登记清理信息。"""
+        """通过 staged_file 标准路径导入测试文档。"""
 
         suffix = self.unique_suffix()
         resolved_file_name = file_name or ("Functional Analysis Notes.pdf" if large else "Functional_Analysis.pdf")
         resolved_file_content_base64 = file_content_base64 or self.read_pdf_base64(large=large)
+        staged_file = self.upload_staged_file(
+            file_name=resolved_file_name,
+            file_bytes=base64.b64decode(resolved_file_content_base64),
+            mime_type=mime_type,
+        )
         payload = await self.tool(
-            "kb_document_import",
+            "kb_document_import_from_staged",
             category_id=category_id,
             title=f"{title_prefix}_{suffix}",
-            file_name=resolved_file_name,
-            mime_type=mime_type,
-            file_content_base64=resolved_file_content_base64,
+            staged_file_id=staged_file["id"],
         )
         self.assert_success(payload)
         return payload["data"]["document"]
+
+    async def update_document(
+        self,
+        *,
+        document_id: int,
+        category_id: int | None = None,
+        title: str | None = None,
+        file_name: str | None = None,
+        mime_type: str | None = None,
+        file_content_base64: str | None = None,
+    ) -> dict[str, Any]:
+        """通过 staged_file 标准路径更新文档。"""
+
+        payload: dict[str, Any] = {
+            "id": document_id,
+            "category_id": category_id,
+            "title": title,
+        }
+        if file_content_base64 is not None:
+            if file_name is None or mime_type is None:
+                raise AssertionError("file_name 和 mime_type 必须与 file_content_base64 一起提供")
+            staged_file = self.upload_staged_file(
+                file_name=file_name,
+                file_bytes=base64.b64decode(file_content_base64),
+                mime_type=mime_type,
+            )
+            payload["staged_file_id"] = staged_file["id"]
+
+        result = await self.tool("kb_document_update_from_staged", **payload)
+        return result
+
+    async def submit_batch_import_task(
+        self,
+        *,
+        items: list[dict[str, Any]],
+        priority: int = 50,
+        max_attempts: int = 3,
+        idempotency_key: str | None = None,
+        request_id: str | None = None,
+        operator: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """测试辅助：把文件项先上传为 staged_file，再调用标准批量任务 Tool。"""
+
+        normalized_items: list[dict[str, Any]] = []
+        for item in items:
+            if item.get("staged_file_id") is not None:
+                normalized_items.append(
+                    {
+                        "category_id": item["category_id"],
+                        "title": item["title"],
+                        "staged_file_id": item["staged_file_id"],
+                        "priority": item.get("priority"),
+                    }
+                )
+                continue
+
+            file_name = item.get("file_name")
+            if not isinstance(file_name, str) or not file_name.strip() or len(file_name.strip()) > 256:
+                return self._build_validation_error_payload("INVALID_ARGUMENT", "validation_error", "file_name 不合法")
+
+            file_content_base64 = item.get("file_content_base64")
+            if not isinstance(file_content_base64, str) or not file_content_base64:
+                return self._build_validation_error_payload("INVALID_ARGUMENT", "validation_error", "file_content_base64 不合法")
+
+            try:
+                file_bytes = base64.b64decode(file_content_base64, validate=True)
+            except (ValueError, binascii.Error):
+                return self._build_validation_error_payload("INVALID_ARGUMENT", "validation_error", "file_content_base64 不合法")
+
+            mime_type = item.get("mime_type")
+            if not isinstance(mime_type, str) or not mime_type.strip():
+                return self._build_validation_error_payload("INVALID_ARGUMENT", "validation_error", "mime_type 不合法")
+            upload_payload = self.http_json(
+                "POST",
+                "/api/staged-files",
+                files={
+                    "file": (file_name, file_bytes, mime_type),
+                },
+            )
+            if not upload_payload.get("success"):
+                return upload_payload
+
+            staged_file = upload_payload["data"]["staged_file"]
+            normalized_items.append(
+                {
+                    "category_id": item["category_id"],
+                    "title": item["title"],
+                    "staged_file_id": staged_file["id"],
+                    "priority": item.get("priority"),
+                }
+            )
+
+        return await self.tool(
+            "kb_document_import_batch_submit_from_staged",
+            items=normalized_items,
+            priority=priority,
+            max_attempts=max_attempts,
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+            operator=operator,
+            trace_id=trace_id,
+        )
 
     def upload_staged_file(
         self,
@@ -204,6 +311,24 @@ class MCPIntegrationTestCase(unittest.TestCase):
         )
         self.assert_success(payload)
         return payload["data"]["staged_file"]
+
+    def _build_validation_error_payload(
+        self,
+        code: str,
+        error_type: str,
+        message: str,
+    ) -> dict[str, Any]:
+        """为测试辅助函数构造统一错误响应。"""
+
+        return {
+            "success": False,
+            "code": code,
+            "message": message,
+            "error": {
+                "type": error_type,
+                "details": {},
+            },
+        }
 
     async def delete_document_best_effort(self, document: dict[str, Any]) -> None:
         """尽最大努力删除测试文档，避免污染共享测试环境。"""

@@ -112,34 +112,6 @@ class DocumentDeleteInput(BaseModel):
         return _strip_or_none(value)
 
 
-class DocumentUpdateInput(BaseModel):
-    request_id: str | None = None
-    operator: str | None = None
-    trace_id: str | None = None
-    id: int | None = Field(default=None, gt=0)
-    document_uid: str | None = Field(default=None, min_length=1, max_length=36)
-    category_id: int | None = Field(default=None, gt=0)
-    title: str | None = Field(default=None, min_length=1, max_length=256)
-    file_name: str | None = Field(default=None, min_length=1, max_length=256)
-    mime_type: str | None = None
-    file_content_base64: str | None = Field(default=None, min_length=1)
-
-    @field_validator("document_uid", "title", "file_name", "mime_type", mode="before")
-    @classmethod
-    def normalize_optional_fields(cls, value: str | None) -> str | None:
-        return _strip_or_none(value)
-
-    @field_validator("mime_type")
-    @classmethod
-    def validate_mime_type(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = normalize_document_mime_type(value)
-        if not is_supported_document_mime_type(normalized):
-            raise ValueError(supported_document_mime_type_message())
-        return normalized
-
-
 class DocumentUpdateFromStagedInput(BaseModel):
     request_id: str | None = None
     operator: str | None = None

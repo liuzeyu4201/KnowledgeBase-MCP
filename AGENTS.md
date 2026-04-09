@@ -82,11 +82,23 @@
 
 #### 文档接口
 
-* `kb_document_import`
+* `kb_document_import_from_staged`
 * `kb_document_get`
 * `kb_document_list`
-* `kb_document_update`
+* `kb_document_update_from_staged`
 * `kb_document_delete`
+
+#### 暂存文件接口
+
+* `kb_staged_file_get`
+* `kb_staged_file_list`
+* `kb_staged_file_delete`
+
+#### 批量导入任务接口
+
+* `kb_document_import_batch_submit_from_staged`
+* `kb_document_import_batch_cancel`
+* `kb_document_import_batch_get`
 
 #### 检索接口
 
@@ -108,7 +120,7 @@
 ### 4. 当前工程关键约定
 
 * 文档检索粒度是 `chunk`，不是整篇文档
-* 文档导入接口传的是 `file_content_base64`，不是本地路径
+* 远端标准导入路径是：先上传暂存文件，再通过 `*_from_staged` 接口导入
 * PDF 更新采用整篇重建，不做局部增量更新
 * 删除、更新、导入都要求跨 PostgreSQL / Milvus / 文件存储的一致性补偿
 * Milvus 不是业务主库，检索结果必须回查 PostgreSQL 后再返回
@@ -118,7 +130,7 @@
 * 修复了参数校验失败时部分接口被 MCP 包成非标准错误的问题
 * 修复了 PDF 文本中含 `NUL (0x00)` 字节导致 PostgreSQL 插入失败的问题
 * 修复了英文问句和中英术语检索时排序质量偏差的问题
-* 当前全量测试结果为 `19/19` 通过
+* 当前全量测试结果为 `124/124` 通过
 
 ### 6. 当前测试资产
 

@@ -28,8 +28,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
             category = await self.create_category(prefix="consistency_cancel_clean")
             try:
                 # 提交任务
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -71,8 +70,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_record")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -129,8 +127,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
             category = await self.create_category(prefix="consistency_running")
             try:
                 # 提交包含多个子项的任务
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -179,8 +176,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_multi_get")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -225,8 +221,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_concurrent")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -281,8 +276,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_cancel_get")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -349,8 +343,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_atomic")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -372,10 +365,10 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
                 )
                 self.assert_success(cancel_payload)
 
-                # 状态直接变为终止状态
+                # 协作式取消允许先进入 cancel_requested，再收敛到终态
                 self.assertIn(
                     cancel_payload["data"]["task"]["status"],
-                    {"canceled"},
+                    {"cancel_requested", "canceled"},
                     f"Unexpected transition to {cancel_payload['data']['task']['status']}",
                 )
 
@@ -401,8 +394,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_counts")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -463,8 +455,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_both_ids")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -521,8 +512,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_repeat_cancel")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -563,8 +553,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_repeat_get")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -607,8 +596,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_not_found")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -657,8 +645,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_mismatch")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -695,8 +682,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_large")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -752,8 +738,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
             category = await self.create_category(prefix="consistency_immediate")
             try:
                 # 提交
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -795,8 +780,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
                 # 提交多个任务
                 task_ids = []
                 for i in range(5):
-                    payload = await self.tool(
-                        "kb_document_import_batch_submit",
+                    payload = await self.submit_batch_import_task(
                         items=[
                             {
                                 "category_id": category["id"],
@@ -853,8 +837,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_timestamps")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -899,8 +882,7 @@ class ImportTaskConsistencyTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="consistency_priority")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     priority=75,
                     max_attempts=5,
                     items=[

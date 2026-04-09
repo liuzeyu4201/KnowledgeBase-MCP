@@ -20,8 +20,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_smoke")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -67,8 +66,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_uid")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -100,8 +98,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_mixed_types")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -156,8 +153,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_cancel_queued")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -202,8 +198,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_cancel_finished")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -253,8 +248,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         """items 为空列表时应被拒绝。"""
 
         async def scenario() -> None:
-            payload = await self.tool(
-                "kb_document_import_batch_submit",
+            payload = await self.submit_batch_import_task(
                 items=[],
             )
             self.assert_error(payload, code="INVALID_ARGUMENT", error_type="validation_error")
@@ -267,8 +261,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_over_limit")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -290,8 +283,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         """item 中包含不存在的 category_id 应被拒绝。"""
 
         async def scenario() -> None:
-            payload = await self.tool(
-                "kb_document_import_batch_submit",
+            payload = await self.submit_batch_import_task(
                 items=[
                     {
                         "category_id": 99999999,
@@ -312,8 +304,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_invalid_mime")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -336,8 +327,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_invalid_b64")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -361,8 +351,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
             category = await self.create_category(prefix="batch_idempotency")
             idempotency_key = f"idem_{self.unique_suffix()}"
             try:
-                payload1 = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload1 = await self.submit_batch_import_task(
                     idempotency_key=idempotency_key,
                     items=[
                         {
@@ -378,8 +367,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
                 task1 = payload1["data"]["task"]
 
                 # 相同 key 再次提交
-                payload2 = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload2 = await self.submit_batch_import_task(
                     idempotency_key=idempotency_key,
                     items=[
                         {
@@ -409,8 +397,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_empty_title")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -444,8 +431,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_mismatch")
             try:
-                submit_payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                submit_payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -513,8 +499,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_priority_range")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     priority=1001,
                     items=[
                         {
@@ -538,8 +523,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_max_attempts_range")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     max_attempts=11,
                     items=[
                         {
@@ -563,8 +547,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_item_priority_range")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -588,8 +571,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_large_pdf")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -615,8 +597,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_no_items")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -656,18 +637,21 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
             try:
 
                 async def submit_once(idx: int) -> dict:
+                    staged_file = self.upload_staged_file(
+                        file_name="Functional_Analysis.pdf",
+                        file_bytes=self.read_pdf_bytes(),
+                        mime_type="application/pdf",
+                    )
                     async with MCPToolClient(self.server_url) as client:
                         return await client.call_tool(
-                            "kb_document_import_batch_submit",
+                            "kb_document_import_batch_submit_from_staged",
                             {
                                 "idempotency_key": idempotency_key,
                                 "items": [
                                     {
                                         "category_id": category["id"],
                                         "title": f"concurrent_idem_item_{idx}_{self.unique_suffix()}",
-                                        "file_name": "Functional_Analysis.pdf",
-                                        "mime_type": "application/pdf",
-                                        "file_content_base64": self.read_pdf_base64(),
+                                        "staged_file_id": staged_file["id"],
                                     },
                                 ],
                             },
@@ -694,17 +678,20 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
             try:
 
                 async def submit_once(idx: int) -> dict:
+                    staged_file = self.upload_staged_file(
+                        file_name="Functional_Analysis.pdf",
+                        file_bytes=self.read_pdf_bytes(),
+                        mime_type="application/pdf",
+                    )
                     async with MCPToolClient(self.server_url) as client:
                         return await client.call_tool(
-                            "kb_document_import_batch_submit",
+                            "kb_document_import_batch_submit_from_staged",
                             {
                                 "items": [
                                     {
                                         "category_id": category["id"],
                                         "title": f"concurrent_diff_{idx}_{self.unique_suffix()}",
-                                        "file_name": "Functional_Analysis.pdf",
-                                        "mime_type": "application/pdf",
-                                        "file_content_base64": self.read_pdf_base64(),
+                                        "staged_file_id": staged_file["id"],
                                     },
                                 ],
                             },
@@ -729,8 +716,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_concurrent_cancel")
             try:
-                submit_payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                submit_payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -769,8 +755,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_progress")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -804,8 +789,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_lifecycle")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],
@@ -839,8 +823,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_metadata")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     request_id=f"req_{self.unique_suffix()}",
                     operator=f"op_{self.unique_suffix()}",
                     trace_id=f"trace_{self.unique_suffix()}",
@@ -876,8 +859,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
             category = await self.create_category(prefix="batch_priority_order")
             try:
                 # 提交低优先级任务
-                low_payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                low_payload = await self.submit_batch_import_task(
                     priority=10,
                     items=[
                         {
@@ -893,8 +875,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
                 low_task = low_payload["data"]["task"]
 
                 # 提交高优先级任务
-                high_payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                high_payload = await self.submit_batch_import_task(
                     priority=100,
                     items=[
                         {
@@ -926,8 +907,7 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
         async def scenario() -> None:
             category = await self.create_category(prefix="batch_item_status")
             try:
-                payload = await self.tool(
-                    "kb_document_import_batch_submit",
+                payload = await self.submit_batch_import_task(
                     items=[
                         {
                             "category_id": category["id"],

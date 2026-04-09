@@ -18,40 +18,8 @@ def register_import_task_tools(mcp: Any) -> None:
     """注册批量文档导入任务相关 MCP Tool。
 
     这些 Tool 面向需要异步导入、批量导入和后台任务编排的 Agent。
-    标准远端路径推荐使用 `*_from_staged` 版本，避免在 MCP 参数里携带大文件内容。
+    标准远端路径统一使用 `*_from_staged` 版本，避免在 MCP 参数里携带大文件内容。
     """
-
-    @mcp.tool(
-        name="kb_document_import_batch_submit",
-        description="兼容路径：提交基于 base64 文件内容的批量文档导入异步任务。",
-    )
-    def kb_document_import_batch_submit(
-        items: list[dict[str, Any]],
-        priority: int = 50,
-        max_attempts: int = 3,
-        idempotency_key: str | None = None,
-        request_id: str | None = None,
-        operator: str | None = None,
-        trace_id: str | None = None,
-    ) -> dict[str, Any]:
-        """提交批量文档导入任务，并返回任务状态。
-
-        Agent 使用建议：
-        - 适合兼容旧调用方
-        - 大文件远端场景优先改用 `kb_document_import_batch_submit_from_staged`
-        - `idempotency_key` 可用于避免重复创建任务
-        """
-
-        payload = {
-            "items": items,
-            "priority": priority,
-            "max_attempts": max_attempts,
-            "idempotency_key": idempotency_key,
-            "request_id": request_id,
-            "operator": operator,
-            "trace_id": trace_id,
-        }
-        return _execute_write(payload=payload, action="submit")
 
     @mcp.tool(
         name="kb_document_import_batch_submit_from_staged",
@@ -143,7 +111,7 @@ def _execute_write(*, payload: dict[str, Any], action: str) -> dict[str, Any]:
     """执行批量导入任务写入类 Tool，并统一处理异常。
 
     Agent 可假设：
-    - `submit*` 成功表示任务已安全写入 PostgreSQL 真相源
+    - `submit_from_staged` 成功表示任务已安全写入 PostgreSQL 真相源
     - `cancel` 成功表示系统已接收取消意图，并会尽力收敛到最终状态
     """
 
@@ -154,9 +122,7 @@ def _execute_write(*, payload: dict[str, Any], action: str) -> dict[str, Any]:
                 category_repository=CategoryRepository(session),
                 staged_file_repository=StagedFileRepository(session),
             )
-            if action == "submit":
-                task = service.submit_task(payload)
-            elif action == "submit_from_staged":
+            if action == "submit_from_staged":
                 task = service.submit_task_from_staged(payload)
             elif action == "cancel":
                 task = service.cancel_task(payload)

@@ -4,51 +4,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-from knowledgebase.domain.document_types import (
-    is_supported_document_mime_type,
-    normalize_document_mime_type,
-    supported_document_mime_type_message,
-)
-
 
 def _strip_or_none(value: str | None) -> str | None:
     if value is None:
         return None
     stripped = value.strip()
     return stripped or None
-
-
-class ImportTaskSubmitItemInput(BaseModel):
-    category_id: int = Field(gt=0)
-    title: str = Field(min_length=1, max_length=256)
-    file_name: str = Field(min_length=1, max_length=256)
-    mime_type: str
-    file_content_base64: str = Field(min_length=1)
-    priority: int | None = Field(default=None, ge=0, le=1000)
-
-    @field_validator("title", "file_name", mode="before")
-    @classmethod
-    def normalize_required_str(cls, value: str) -> str:
-        stripped = _strip_or_none(value)
-        if stripped is None:
-            raise ValueError("字段不能为空")
-        return stripped
-
-    @field_validator("mime_type", mode="before")
-    @classmethod
-    def normalize_mime_type(cls, value: str) -> str:
-        stripped = _strip_or_none(value)
-        if stripped is None:
-            raise ValueError("mime_type 不能为空")
-        return stripped
-
-    @field_validator("mime_type")
-    @classmethod
-    def validate_mime_type(cls, value: str) -> str:
-        normalized = normalize_document_mime_type(value)
-        if not is_supported_document_mime_type(normalized):
-            raise ValueError(supported_document_mime_type_message())
-        return normalized
 
 
 class ImportTaskSubmitFromStagedItemInput(BaseModel):
@@ -64,21 +25,6 @@ class ImportTaskSubmitFromStagedItemInput(BaseModel):
         if stripped is None:
             raise ValueError("字段不能为空")
         return stripped
-
-
-class ImportTaskSubmitInput(BaseModel):
-    request_id: str | None = None
-    operator: str | None = None
-    trace_id: str | None = None
-    idempotency_key: str | None = Field(default=None, max_length=128)
-    priority: int = Field(default=50, ge=0, le=1000)
-    max_attempts: int = Field(default=3, ge=1, le=10)
-    items: list[ImportTaskSubmitItemInput] = Field(min_length=1, max_length=100)
-
-    @field_validator("idempotency_key", mode="before")
-    @classmethod
-    def normalize_idempotency_key(cls, value: str | None) -> str | None:
-        return _strip_or_none(value)
 
 
 class ImportTaskSubmitFromStagedInput(BaseModel):

@@ -95,51 +95,47 @@ class DocumentContractTestCase(MCPIntegrationTestCase):
 
     def test_document_import_rejects_invalid_category(self) -> None:
         async def scenario() -> None:
+            staged_file = self.upload_staged_file(
+                file_name="Functional_Analysis.pdf",
+                file_bytes=self.read_pdf_bytes(),
+                mime_type="application/pdf",
+            )
             payload = await self.tool(
-                "kb_document_import",
+                "kb_document_import_from_staged",
                 category_id=99999999,
                 title="document_invalid_category",
-                file_name="Functional_Analysis.pdf",
-                mime_type="application/pdf",
-                file_content_base64=self.read_pdf_base64(),
+                staged_file_id=staged_file["id"],
             )
             self.assert_error(payload, code="CATEGORY_NOT_FOUND", error_type="not_found")
 
         self.run_async(scenario())
 
-    def test_document_import_rejects_invalid_mime_type(self) -> None:
+    def test_document_import_from_staged_rejects_missing_staged_file(self) -> None:
         async def scenario() -> None:
-            category = await self.create_category(prefix="document_invalid_mime")
+            category = await self.create_category(prefix="document_missing_staged")
             try:
                 payload = await self.tool(
-                    "kb_document_import",
+                    "kb_document_import_from_staged",
                     category_id=category["id"],
-                    title="invalid_mime_case",
-                    file_name="Functional_Analysis.txt",
-                    mime_type="text/plain",
-                    file_content_base64=self.read_pdf_base64(),
+                    title="missing_staged_case",
+                    staged_file_id=99999999,
                 )
-                self.assert_error(payload, code="INVALID_ARGUMENT", error_type="validation_error")
+                self.assert_error(payload, code="STAGED_FILE_NOT_FOUND", error_type="not_found")
             finally:
                 await self.delete_category_best_effort(category)
 
         self.run_async(scenario())
 
-    def test_document_import_rejects_invalid_base64(self) -> None:
+    def test_document_upload_rejects_invalid_mime_type(self) -> None:
         async def scenario() -> None:
-            category = await self.create_category(prefix="document_invalid_base64")
-            try:
-                payload = await self.tool(
-                    "kb_document_import",
-                    category_id=category["id"],
-                    title="invalid_base64_case",
-                    file_name="Functional_Analysis.pdf",
-                    mime_type="application/pdf",
-                    file_content_base64="%%%not_base64%%%",
-                )
-                self.assert_error(payload, code="INVALID_ARGUMENT", error_type="validation_error")
-            finally:
-                await self.delete_category_best_effort(category)
+            payload = self.http_json(
+                "POST",
+                "/api/staged-files",
+                files={
+                    "file": ("Functional_Analysis.txt", self.read_pdf_bytes(), "text/plain"),
+                },
+            )
+            self.assert_error(payload, code="INVALID_ARGUMENT", error_type="validation_error")
 
         self.run_async(scenario())
 
@@ -166,7 +162,7 @@ class DocumentContractTestCase(MCPIntegrationTestCase):
             )
             try:
                 payload = await self.tool(
-                    "kb_document_update",
+                    "kb_document_update_from_staged",
                     id=document["id"],
                     category_id=target_category["id"],
                     title="updated_document_title",
@@ -193,9 +189,8 @@ class DocumentContractTestCase(MCPIntegrationTestCase):
                 file_content_base64=self.read_markdown_base64(title="Before Replace"),
             )
             try:
-                payload = await self.tool(
-                    "kb_document_update",
-                    id=document["id"],
+                payload = await self.update_document(
+                    document_id=document["id"],
                     file_name="replace.docx",
                     mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     file_content_base64=self.read_docx_base64(title="After Replace"),
