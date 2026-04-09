@@ -58,3 +58,191 @@
 ## 一句话定义
 
 这是一个基于 **Python + uv + Milvus** 构建的、供 **Agent 调用的知识库 MCP Server** 项目，目标是以**生产级、模块化、可扩展、稳定**的方式，提供面向知识库数据的标准化管理与检索能力。
+
+---
+
+## 当前进度记录
+
+以下内容作为当前项目的长期记忆，后续协作默认以此为准。
+
+### 1. 当前分支约定
+
+* `dev`：主开发分支，当前功能修复与集成结果以该分支为准
+* `test`：测试分支，用于集中补测试、压测和失败场景验证
+
+### 2. 当前已实现能力
+
+#### 分类接口
+
+* `kb_category_create`
+* `kb_category_get`
+* `kb_category_list`
+* `kb_category_update`
+* `kb_category_delete`
+
+#### 文档接口
+
+* `kb_document_import_from_staged`
+* `kb_document_get`
+* `kb_document_list`
+* `kb_document_update_from_staged`
+* `kb_document_delete`
+
+#### 暂存文件接口
+
+* `kb_staged_file_get`
+* `kb_staged_file_list`
+* `kb_staged_file_delete`
+
+#### 批量导入任务接口
+
+* `kb_document_import_batch_submit_from_staged`
+* `kb_document_import_batch_cancel`
+* `kb_document_import_batch_get`
+
+#### 检索接口
+
+* `kb_search_retrieve`
+
+### 3. 当前存储与检索实现状态
+
+* 业务主库使用 PostgreSQL
+* 向量检索使用 Milvus
+* 原始 PDF 使用本地文件存储
+* Milvus 当前采用：
+  * 稠密向量：Embedding 模型生成
+  * 词法检索：Milvus BM25
+  * `content` 字段开启 analyzer
+* 当前 analyzer 已切到中英文自动识别：
+  * 英文走 `standard + lowercase`
+  * 中文走 `jieba + removepunct`
+
+### 4. 当前工程关键约定
+
+* 文档检索粒度是 `chunk`，不是整篇文档
+* 远端标准导入路径是：先上传暂存文件，再通过 `*_from_staged` 接口导入
+* PDF 更新采用整篇重建，不做局部增量更新
+* 删除、更新、导入都要求跨 PostgreSQL / Milvus / 文件存储的一致性补偿
+* Milvus 不是业务主库，检索结果必须回查 PostgreSQL 后再返回
+
+### 5. 当前已修复的重要问题
+
+* 修复了参数校验失败时部分接口被 MCP 包成非标准错误的问题
+* 修复了 PDF 文本中含 `NUL (0x00)` 字节导致 PostgreSQL 插入失败的问题
+* 修复了英文问句和中英术语检索时排序质量偏差的问题
+* 当前全量测试结果为 `124/124` 通过
+
+### 6. 当前测试资产
+
+* 测试目录：`test/`
+* 测试报告输出位置：`docs/测试文档-time.md`
+* 测试覆盖包括：
+  * 契约测试
+  * 边界测试
+  * 失败测试
+  * 并发测试
+  * 压力测试
+
+---
+
+## 常用命令
+
+以下命令是当前项目里最常用的一组操作，后续协作优先复用。
+
+### 1. 基础环境
+
+```bash
+uv sync
+```
+
+```bash
+PYTHONPYCACHEPREFIX=/tmp/knowledgebase-pyc python3 -m compileall knowledgebase test main.py
+```
+
+### 2. Docker 开发环境
+
+启动开发环境：
+
+```bash
+docker compose -f docker-compose.dev.yml --env-file .env.dev up --build -d
+```
+
+仅重启应用容器：
+
+```bash
+docker compose -f docker-compose.dev.yml --env-file .env.dev restart app
+```
+
+查看容器状态：
+
+```bash
+docker compose -f docker-compose.dev.yml --env-file .env.dev ps
+```
+
+查看应用日志：
+
+```bash
+docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 app
+```
+
+停止开发环境：
+
+```bash
+docker compose -f docker-compose.dev.yml --env-file .env.dev down
+```
+
+### 3. 进入容器执行命令
+
+```bash
+docker exec knowledgebase-app-dev sh -lc 'cd /app && /opt/venv/bin/python -m test.run_suite'
+```
+
+```bash
+docker exec knowledgebase-app-dev sh -lc 'cd /app && /opt/venv/bin/python -m unittest -v test.test_search_contract'
+```
+
+```bash
+docker exec knowledgebase-app-dev sh -lc 'curl -i http://127.0.0.1:8000/mcp'
+```
+
+### 4. Git 操作
+
+查看分支和工作区：
+
+```bash
+git status --short --branch
+```
+
+查看最近提交：
+
+```bash
+git log --oneline --decorate -8
+```
+
+切换分支：
+
+```bash
+git switch dev
+git switch test
+```
+
+把 `test` 合并到 `dev`：
+
+```bash
+git switch dev
+git merge --no-ff test
+```
+
+### 5. 当前最常用的测试入口
+
+全量测试：
+
+```bash
+docker exec knowledgebase-app-dev sh -lc 'cd /app && /opt/venv/bin/python -m test.run_suite'
+```
+
+运行后检查报告：
+
+```bash
+sed -n '1,120p' docs/测试文档-time.md
+```
