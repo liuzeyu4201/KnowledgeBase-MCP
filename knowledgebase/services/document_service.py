@@ -16,13 +16,16 @@ from knowledgebase.integrations.storage.file_storage import FileStorage
 from knowledgebase.repositories.category_repository import CategoryRepository
 from knowledgebase.repositories.chunk_repository import ChunkRepository
 from knowledgebase.repositories.document_repository import DocumentRepository
+from knowledgebase.repositories.staged_file_repository import StagedFileRepository
 from knowledgebase.schemas.document import (
     DocumentDeleteInput,
     DocumentGetInput,
     DocumentImportInput,
+    DocumentImportFromStagedInput,
     DocumentListInput,
     DocumentOutput,
     DocumentUpdateInput,
+    DocumentUpdateFromStagedInput,
 )
 
 
@@ -67,10 +70,12 @@ class DocumentService:
         category_repository: CategoryRepository,
         document_repository: DocumentRepository,
         chunk_repository: ChunkRepository,
+        staged_file_repository: StagedFileRepository,
     ) -> None:
         self.category_repository = category_repository
         self.document_repository = document_repository
         self.chunk_repository = chunk_repository
+        self.staged_file_repository = staged_file_repository
         self.storage = FileStorage()
         self.parser = DocumentParser()
         self.chunker = TextChunker()
@@ -79,6 +84,7 @@ class DocumentService:
         self._compensation_context: ImportCompensationContext | None = None
         self._delete_compensation_context: DeleteCompensationContext | None = None
         self._update_compensation_context: UpdateCompensationContext | None = None
+        self._post_commit_cleanup_paths: list[str] = []
 
     def import_document(self, payload: dict) -> dict:
         """导入文档、创建切片，并写入 Milvus 稠密向量和 BM25 索引。"""
@@ -128,6 +134,51 @@ class DocumentService:
             file_bytes=file_bytes,
             cancellation_checker=cancellation_checker,
         )
+
+    def import_document_from_staged(
+        self,
+        payload: dict,
+        *,
+        cancellation_checker: Callable[[], bool] | None = None,
+    ) -> dict:
+        """从暂存文件导入文档，作为远端标准导入路径。"""
+
+        self._compensation_context = ImportCompensationContext()
+        try:
+            data = DocumentImportFromStagedInput.model_validate(payload)
+        except ValidationError as exc:
+            raise AppError(
+                code="INVALID_ARGUMENT",
+                message="文档导入参数不合法",
+                error_type="validation_error",
+                details={"errors": exc.errors()},
+            ) from exc
+
+        staged_file = self._claim_staged_file_for_consumption(data.staged_file_id)
+        staged_storage_uri = staged_file.storage_uri
+        file_bytes = self.storage.read_file_bytes(staged_storage_uri)
+        result = self._import_document_from_bytes(
+            data=DocumentImportInput(
+                category_id=data.category_id,
+                title=data.title,
+                file_name=staged_file.file_name,
+                mime_type=staged_file.mime_type,
+                file_content_base64="staged-file",
+                request_id=data.request_id,
+                operator=data.operator,
+                trace_id=data.trace_id,
+            ),
+            file_bytes=file_bytes,
+            cancellation_checker=cancellation_checker,
+        )
+        self.staged_file_repository.mark_consumed(
+            staged_file,
+            linked_document_id=result["document"]["id"],
+            final_storage_uri=result["document"]["storage_uri"],
+        )
+        if staged_storage_uri != result["document"]["storage_uri"]:
+            self._post_commit_cleanup_paths.append(staged_storage_uri)
+        return result
 
     def get_document(self, payload: dict) -> DocumentOutput:
         """按主键或文档业务标识查询单个文档详情。"""
@@ -257,147 +308,78 @@ class DocumentService:
         self._ensure_file_update_fields(data, has_file_update=has_file_update)
 
         if not has_file_update:
-            updated = self.document_repository.update_document(
-                document,
-                category_id=data.category_id,
-                title=data.title,
+            return self._build_document_write_result(
+                self.document_repository.update_document(
+                    document,
+                    category_id=data.category_id,
+                    title=data.title,
+                )
             )
-            return {
-                "document": DocumentOutput.from_model(updated).model_dump(mode="json"),
-                "chunks": {
-                    "count": updated.chunk_count,
-                },
-                "vector_store": {
-                    "provider": "milvus",
-                    "collection_name": self.milvus.collection_name,
-                    "dense_model": self._embedding_model_name(),
-                    "sparse_strategy": "milvus_bm25",
-                },
-            }
 
-        old_chunks = self.chunk_repository.list_by_document_id(document.id)
-        old_chunk_ids = [chunk.id for chunk in old_chunks]
-
-        self._update_compensation_context = UpdateCompensationContext()
-        self._update_compensation_context.old_milvus_rows = self.milvus.fetch_chunks(old_chunk_ids)
-
-        old_storage_uri, staged_old_storage_uri = self.storage.stage_delete_file(document.storage_uri)
-        self._update_compensation_context.old_storage_uri = old_storage_uri
-        self._update_compensation_context.staged_old_storage_uri = staged_old_storage_uri
-
-        new_storage_uri, file_bytes = self.storage.save_file(
+        file_bytes = self.storage.decode_base64_file(data.file_content_base64)
+        return self._update_document_with_file_bytes(
+            document=document,
+            category_id=data.category_id,
+            title=data.title,
             file_name=data.file_name,
-            file_content_base64=data.file_content_base64,
+            mime_type=data.mime_type,
+            file_bytes=file_bytes,
         )
-        self._update_compensation_context.new_storage_uri = new_storage_uri
-        file_sha256 = hashlib.sha256(file_bytes).hexdigest()
+
+    def update_document_from_staged(self, payload: dict) -> dict:
+        """使用暂存文件替换文档源文件并执行整篇重建。"""
 
         try:
-            pages = self.parser.parse(mime_type=data.mime_type, content=file_bytes)
-            chunk_payloads = self.chunker.chunk_pages(pages)
-            if not chunk_payloads:
-                raise AppError(
-                    code="DOCUMENT_PARSE_FAILED",
-                    message="no chunks generated from document",
-                    error_type="system_error",
-                )
-
-            dense_vectors = self.embedder.embed_texts([item.content for item in chunk_payloads])
-
-            if old_chunk_ids:
-                self.milvus.delete_chunks(old_chunk_ids)
-                self._update_compensation_context.old_milvus_deleted = True
-
-            self.chunk_repository.delete_many(old_chunks)
-
-            updating_document = self.document_repository.update_document(
-                document,
-                category_id=data.category_id,
-                title=data.title,
-                source_type=resolve_document_source_type(data.mime_type),
-                file_name=data.file_name,
-                storage_uri=new_storage_uri,
-                mime_type=data.mime_type,
-                file_size=len(file_bytes),
-                file_sha256=file_sha256,
-                version=document.version + 1,
-                chunk_count=0,
-                parse_status="processing",
-                vector_status="indexing",
-                last_error=None,
-            )
-
-            chunk_rows = []
-            for item in chunk_payloads:
-                chunk_rows.append(
-                    {
-                        "document_id": updating_document.id,
-                        "chunk_no": item.chunk_no,
-                        "page_no": item.page_no,
-                        "char_start": item.char_start,
-                        "char_end": item.char_end,
-                        "token_count": item.token_count,
-                        "content": item.content,
-                        "content_hash": hashlib.sha256(item.content.encode("utf-8")).hexdigest(),
-                        "embedding_model": self._embedding_model_name(),
-                        "vector_version": updating_document.version,
-                        "vector_status": "ready",
-                        "metadata_json": {"page_no": item.page_no},
-                    }
-                )
-
-            new_chunks = self.chunk_repository.create_many(chunk_rows)
-            self._update_compensation_context.new_milvus_chunk_ids = [chunk.id for chunk in new_chunks]
-
-            milvus_rows = []
-            for chunk, dense_vector in zip(new_chunks, dense_vectors, strict=True):
-                milvus_rows.append(
-                    {
-                        "chunk_id": chunk.id,
-                        "document_id": updating_document.id,
-                        "category_id": updating_document.category_id,
-                        "chunk_no": chunk.chunk_no,
-                        "page_no": chunk.page_no or 0,
-                        "content": chunk.content,
-                        "dense_vector": dense_vector,
-                    }
-                )
-
-            self.milvus.insert_chunks(milvus_rows)
-            self._update_compensation_context.new_milvus_inserted = True
-
-            updated = self.document_repository.update_document(
-                updating_document,
-                chunk_count=len(new_chunks),
-                parse_status="success",
-                vector_status="ready",
-                last_error=None,
-            )
-        except Exception as exc:  # noqa: BLE001
-            rollback_error = self.rollback_update_side_effects(original_error=exc)
-            if rollback_error is not None:
-                raise rollback_error from exc
-            if isinstance(exc, AppError):
-                raise
+            data = DocumentUpdateFromStagedInput.model_validate(payload)
+        except ValidationError as exc:
             raise AppError(
-                code="DOCUMENT_UPDATE_FAILED",
-                message="document update failed",
-                error_type="system_error",
-                details={"error": str(exc)},
+                code="INVALID_ARGUMENT",
+                message="文档更新参数不合法",
+                error_type="validation_error",
+                details={"errors": exc.errors()},
             ) from exc
 
-        return {
-            "document": DocumentOutput.from_model(updated).model_dump(mode="json"),
-            "chunks": {
-                "count": updated.chunk_count,
-            },
-            "vector_store": {
-                "provider": "milvus",
-                "collection_name": self.milvus.collection_name,
-                "dense_model": self._embedding_model_name(),
-                "sparse_strategy": "milvus_bm25",
-            },
-        }
+        document = self._resolve_document(id=data.id, document_uid=data.document_uid)
+        self._ensure_update_from_staged_fields_present(data)
+
+        if data.category_id is not None:
+            category = self.category_repository.get_by_id(data.category_id)
+            if category is None:
+                raise AppError(
+                    code="CATEGORY_NOT_FOUND",
+                    message="category not found",
+                    error_type="not_found",
+                    details={"category_id": data.category_id},
+                )
+
+        if data.staged_file_id is None:
+            return self._build_document_write_result(
+                self.document_repository.update_document(
+                    document,
+                    category_id=data.category_id,
+                    title=data.title,
+                )
+            )
+
+        staged_file = self._claim_staged_file_for_consumption(data.staged_file_id)
+        staged_storage_uri = staged_file.storage_uri
+        file_bytes = self.storage.read_file_bytes(staged_storage_uri)
+        result = self._update_document_with_file_bytes(
+            document=document,
+            category_id=data.category_id,
+            title=data.title,
+            file_name=staged_file.file_name,
+            mime_type=staged_file.mime_type,
+            file_bytes=file_bytes,
+        )
+        self.staged_file_repository.mark_consumed(
+            staged_file,
+            linked_document_id=result["document"]["id"],
+            final_storage_uri=result["document"]["storage_uri"],
+        )
+        if staged_storage_uri != result["document"]["storage_uri"]:
+            self._post_commit_cleanup_paths.append(staged_storage_uri)
+        return result
 
     def rollback_import_side_effects(
         self,
@@ -563,6 +545,13 @@ class DocumentService:
             )
         self._update_compensation_context = None
 
+    def finalize_post_commit_cleanup(self) -> None:
+        """提交成功后清理被 from_staged 链路替换掉的暂存物理文件。"""
+
+        for file_path in self._post_commit_cleanup_paths:
+            self.storage.delete_file(file_path)
+        self._post_commit_cleanup_paths = []
+
     def _resolve_document(
         self,
         *,
@@ -611,6 +600,16 @@ class DocumentService:
             and data.mime_type is None
             and data.file_content_base64 is None
         ):
+            raise AppError(
+                code="INVALID_ARGUMENT",
+                message="at least one update field is required",
+                error_type="validation_error",
+            )
+
+    def _ensure_update_from_staged_fields_present(self, data: DocumentUpdateFromStagedInput) -> None:
+        """确保 from_staged 更新请求至少包含一个实际变更字段。"""
+
+        if data.category_id is None and data.title is None and data.staged_file_id is None:
             raise AppError(
                 code="INVALID_ARGUMENT",
                 message="at least one update field is required",
@@ -741,6 +740,8 @@ class DocumentService:
             self.milvus.insert_chunks(milvus_rows)
             self._compensation_context.milvus_inserted = True
 
+            # 在最终提交成功状态前再次检查取消信号，避免长文档尾阶段漏掉取消请求。
+            self._check_cooperative_cancellation(cancellation_checker)
             document = self.document_repository.update_status(
                 document,
                 parse_status="success",
@@ -762,16 +763,7 @@ class DocumentService:
             ) from exc
 
         return {
-            "document": DocumentOutput.from_model(document).model_dump(mode="json"),
-            "chunks": {
-                "count": document.chunk_count,
-            },
-            "vector_store": {
-                "provider": "milvus",
-                "collection_name": self.milvus.collection_name,
-                "dense_model": self._embedding_model_name(),
-                "sparse_strategy": "milvus_bm25",
-            },
+            **self._build_document_write_result(document),
         }
 
     def _check_cooperative_cancellation(
@@ -788,3 +780,180 @@ class DocumentService:
                 message="task canceled cooperatively",
                 error_type="business_error",
             )
+
+    def _claim_staged_file_for_consumption(self, staged_file_id: int):
+        """锁定并校验暂存文件，确保可被当前请求消费。"""
+
+        staged_file = self.staged_file_repository.get_for_update(staged_file_id)
+        if staged_file is None:
+            raise AppError(
+                code="STAGED_FILE_NOT_FOUND",
+                message="staged file not found",
+                error_type="not_found",
+                details={"staged_file_id": staged_file_id},
+            )
+
+        if staged_file.status == "consumed":
+            raise AppError(
+                code="STAGED_FILE_ALREADY_CONSUMED",
+                message="staged file already consumed",
+                error_type="business_error",
+                details={"staged_file_id": staged_file_id},
+            )
+        if staged_file.status == "expired":
+            raise AppError(
+                code="STAGED_FILE_EXPIRED",
+                message="staged file expired",
+                error_type="business_error",
+                details={"staged_file_id": staged_file_id},
+            )
+        if staged_file.status not in {"uploaded", "failed"}:
+            raise AppError(
+                code="STAGED_FILE_STATUS_INVALID",
+                message="staged file status does not allow consumption",
+                error_type="business_error",
+                details={"staged_file_id": staged_file_id, "status": staged_file.status},
+            )
+
+        return self.staged_file_repository.mark_consuming(staged_file)
+
+    def _update_document_with_file_bytes(
+        self,
+        *,
+        document,
+        category_id: int | None,
+        title: str | None,
+        file_name: str,
+        mime_type: str,
+        file_bytes: bytes,
+    ) -> dict:
+        """执行带新文件内容的文档整篇重建更新。"""
+
+        old_chunks = self.chunk_repository.list_by_document_id(document.id)
+        old_chunk_ids = [chunk.id for chunk in old_chunks]
+
+        self._update_compensation_context = UpdateCompensationContext()
+        self._update_compensation_context.old_milvus_rows = self.milvus.fetch_chunks(old_chunk_ids)
+
+        old_storage_uri, staged_old_storage_uri = self.storage.stage_delete_file(document.storage_uri)
+        self._update_compensation_context.old_storage_uri = old_storage_uri
+        self._update_compensation_context.staged_old_storage_uri = staged_old_storage_uri
+
+        new_storage_uri, saved_file_bytes = self.storage.save_file_bytes(
+            file_name=file_name,
+            file_bytes=file_bytes,
+        )
+        self._update_compensation_context.new_storage_uri = new_storage_uri
+        file_sha256 = hashlib.sha256(saved_file_bytes).hexdigest()
+
+        try:
+            pages = self.parser.parse(mime_type=mime_type, content=saved_file_bytes)
+            chunk_payloads = self.chunker.chunk_pages(pages)
+            if not chunk_payloads:
+                raise AppError(
+                    code="DOCUMENT_PARSE_FAILED",
+                    message="no chunks generated from document",
+                    error_type="system_error",
+                )
+
+            dense_vectors = self.embedder.embed_texts([item.content for item in chunk_payloads])
+
+            if old_chunk_ids:
+                self.milvus.delete_chunks(old_chunk_ids)
+                self._update_compensation_context.old_milvus_deleted = True
+
+            self.chunk_repository.delete_many(old_chunks)
+
+            updating_document = self.document_repository.update_document(
+                document,
+                category_id=category_id,
+                title=title,
+                source_type=resolve_document_source_type(mime_type),
+                file_name=file_name,
+                storage_uri=new_storage_uri,
+                mime_type=mime_type,
+                file_size=len(saved_file_bytes),
+                file_sha256=file_sha256,
+                version=document.version + 1,
+                chunk_count=0,
+                parse_status="processing",
+                vector_status="indexing",
+                last_error=None,
+            )
+
+            chunk_rows = []
+            for item in chunk_payloads:
+                chunk_rows.append(
+                    {
+                        "document_id": updating_document.id,
+                        "chunk_no": item.chunk_no,
+                        "page_no": item.page_no,
+                        "char_start": item.char_start,
+                        "char_end": item.char_end,
+                        "token_count": item.token_count,
+                        "content": item.content,
+                        "content_hash": hashlib.sha256(item.content.encode("utf-8")).hexdigest(),
+                        "embedding_model": self._embedding_model_name(),
+                        "vector_version": updating_document.version,
+                        "vector_status": "ready",
+                        "metadata_json": {"page_no": item.page_no},
+                    }
+                )
+
+            new_chunks = self.chunk_repository.create_many(chunk_rows)
+            self._update_compensation_context.new_milvus_chunk_ids = [chunk.id for chunk in new_chunks]
+
+            milvus_rows = []
+            for chunk, dense_vector in zip(new_chunks, dense_vectors, strict=True):
+                milvus_rows.append(
+                    {
+                        "chunk_id": chunk.id,
+                        "document_id": updating_document.id,
+                        "category_id": updating_document.category_id,
+                        "chunk_no": chunk.chunk_no,
+                        "page_no": chunk.page_no or 0,
+                        "content": chunk.content,
+                        "dense_vector": dense_vector,
+                    }
+                )
+
+            self.milvus.insert_chunks(milvus_rows)
+            self._update_compensation_context.new_milvus_inserted = True
+
+            updated = self.document_repository.update_document(
+                updating_document,
+                chunk_count=len(new_chunks),
+                parse_status="success",
+                vector_status="ready",
+                last_error=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            rollback_error = self.rollback_update_side_effects(original_error=exc)
+            if rollback_error is not None:
+                raise rollback_error from exc
+            if isinstance(exc, AppError):
+                raise
+            raise AppError(
+                code="DOCUMENT_UPDATE_FAILED",
+                message="document update failed",
+                error_type="system_error",
+                details={"error": str(exc)},
+            ) from exc
+
+        return self._build_document_write_result(updated)
+
+    def _build_document_write_result(self, document) -> dict:
+        """构造文档写入类接口统一返回体。"""
+
+        return {
+            "document": DocumentOutput.from_model(document).model_dump(mode="json"),
+            "chunks": {
+                "count": document.chunk_count,
+            },
+            "vector_store": {
+                "provider": "milvus",
+                "collection_name": self.milvus.collection_name,
+                "dense_model": self._embedding_model_name(),
+                "sparse_strategy": "milvus_bm25",
+            },
+        }

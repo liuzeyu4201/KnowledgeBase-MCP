@@ -1,10 +1,10 @@
 # 测试文档
 
-- 生成时间: 2026-04-08T10:36:03.056611
-- Python: 3.13.12
+- 生成时间: 2026-04-09T10:18:44.769605
+- Python: 3.13.13
 - 平台: Linux-6.12.76-linuxkit-aarch64-with-glibc2.41
-- 执行用例总数: 118
-- 通过: 118
+- 执行用例总数: 124
+- 通过: 124
 - 失败: 0
 - 错误: 0
 - 跳过: 0
@@ -43,8 +43,8 @@ test_cancel_with_mismatched_ids_returns_error (test_import_task_consistency.Impo
 一致性：使用不匹配的 id 和 task_uid 应返回错误。 ... ok
 test_cancel_with_nonexistent_id_returns_not_found (test_import_task_consistency.ImportTaskConsistencyTestCase.test_cancel_with_nonexistent_id_returns_not_found)
 一致性：取消不存在的任务应返回 NOT_FOUND。 ... ok
-test_concurrent_cancel_all_return_same_final_state (test_import_task_consistency.ImportTaskConsistencyTestCase.test_concurrent_cancel_all_return_same_final_state)
-一致性：并发取消同一任务，所有请求应返回相同最终状态。 ... ok
+test_concurrent_cancel_all_return_explainable_states (test_import_task_consistency.ImportTaskConsistencyTestCase.test_concurrent_cancel_all_return_explainable_states)
+一致性：并发取消同一任务，所有请求都应返回可解释状态且最终收敛。 ... ok
 test_concurrent_cancel_and_get_never_shows_inconsistent_state (test_import_task_consistency.ImportTaskConsistencyTestCase.test_concurrent_cancel_and_get_never_shows_inconsistent_state)
 一致性：并发取消和查询操作不应显示不一致的状态。 ... ok
 test_large_task_cancel_consistency (test_import_task_consistency.ImportTaskConsistencyTestCase.test_large_task_cancel_consistency)
@@ -137,8 +137,8 @@ test_batch_cancel_with_only_id (test_import_task_production_edge_cases.Productio
 空值：仅通过 id 取消。 ... ok
 test_batch_cancel_with_only_task_uid (test_import_task_production_edge_cases.ProductionEdgeCaseTestCase.test_batch_cancel_with_only_task_uid)
 空值：仅通过 task_uid 取消。 ... ok
-test_batch_get_after_cancel_returns_canceled_status (test_import_task_production_edge_cases.ProductionEdgeCaseTestCase.test_batch_get_after_cancel_returns_canceled_status)
-状态机：取消后查询应返回 canceled 状态。 ... ok
+test_batch_get_after_cancel_returns_terminal_status (test_import_task_production_edge_cases.ProductionEdgeCaseTestCase.test_batch_get_after_cancel_returns_terminal_status)
+状态机：提交后立即取消，最终查询应返回可解释的终态。 ... ok
 test_batch_get_rejects_negative_id (test_import_task_production_edge_cases.ProductionEdgeCaseTestCase.test_batch_get_rejects_negative_id)
 异常：查询时 id 为负数。 ... ok
 test_batch_get_with_only_id (test_import_task_production_edge_cases.ProductionEdgeCaseTestCase.test_batch_get_with_only_id)
@@ -226,9 +226,15 @@ test_bm25_natural_question_should_return_hilbert_definition_in_top3 (test_search
 test_hybrid_search_chinese_query_should_hit_hilbert_section_in_top3 (test_search_contract.SearchContractTestCase.test_hybrid_search_chinese_query_should_hit_hilbert_section_in_top3) ... ok
 test_search_rejects_empty_query (test_search_contract.SearchContractTestCase.test_search_rejects_empty_query) ... ok
 test_search_rejects_invalid_alpha (test_search_contract.SearchContractTestCase.test_search_rejects_invalid_alpha) ... ok
+test_batch_submit_from_staged_smoke (test_staged_file_contract.StagedFileContractTestCase.test_batch_submit_from_staged_smoke) ... ok
+test_document_import_from_staged_smoke (test_staged_file_contract.StagedFileContractTestCase.test_document_import_from_staged_smoke) ... ok
+test_document_update_from_staged_rebuilds_document (test_staged_file_contract.StagedFileContractTestCase.test_document_update_from_staged_rebuilds_document) ... ok
+test_staged_file_delete_rejects_consumed_file (test_staged_file_contract.StagedFileContractTestCase.test_staged_file_delete_rejects_consumed_file) ... ok
+test_staged_file_http_upload_and_mcp_manage_smoke (test_staged_file_contract.StagedFileContractTestCase.test_staged_file_http_upload_and_mcp_manage_smoke) ... ok
+test_staged_file_upload_rejects_invalid_mime (test_staged_file_contract.StagedFileContractTestCase.test_staged_file_upload_rejects_invalid_mime) ... ok
 
 ----------------------------------------------------------------------
-Ran 118 tests in 314.712s
+Ran 124 tests in 474.029s
 
 OK
 ```

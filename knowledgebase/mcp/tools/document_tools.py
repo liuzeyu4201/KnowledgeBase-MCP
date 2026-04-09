@@ -10,21 +10,36 @@ from knowledgebase.domain.exceptions import AppError
 from knowledgebase.repositories.category_repository import CategoryRepository
 from knowledgebase.repositories.chunk_repository import ChunkRepository
 from knowledgebase.repositories.document_repository import DocumentRepository
+from knowledgebase.repositories.staged_file_repository import StagedFileRepository
 from knowledgebase.schemas.common import build_error_response, build_success_response
 from knowledgebase.services.document_service import DocumentService
 
 
 def register_document_tools(mcp: Any) -> None:
-    """注册文档相关 MCP Tool。"""
+    """注册文档相关 MCP Tool。
 
-    @mcp.tool(name="kb_document_get", description="按主键或文档唯一标识查询文档详情")
+    文档 Tool 负责知识文档主实体的 CRUD。
+    其中：
+    - `kb_document_import` / `kb_document_update` 兼容直接传 base64 内容
+    - `*_from_staged` 是远端标准路径，推荐 Agent 优先使用
+    """
+
+    @mcp.tool(
+        name="kb_document_get",
+        description="按主键或 document_uid 查询文档详情，返回文档元数据、状态和分类信息。",
+    )
     def kb_document_get(
         id: int | None = None,
         document_uid: str | None = None,
         request_id: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """读取单个文档详情。"""
+        """读取单个文档详情。
+
+        Agent 使用建议：
+        - `id` 与 `document_uid` 二选一
+        - 适合在更新、删除、重建前确认文档当前状态
+        """
 
         payload = {
             "id": id,
@@ -34,7 +49,10 @@ def register_document_tools(mcp: Any) -> None:
         }
         return _execute_read(payload=payload, action="get")
 
-    @mcp.tool(name="kb_document_list", description="分页查询文档列表")
+    @mcp.tool(
+        name="kb_document_list",
+        description="分页查询文档列表，支持按分类、标题、文件名和处理状态过滤。",
+    )
     def kb_document_list(
         category_id: int | None = None,
         title: str | None = None,
@@ -46,7 +64,12 @@ def register_document_tools(mcp: Any) -> None:
         request_id: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """按过滤条件分页查询文档列表。"""
+        """按过滤条件分页查询文档列表。
+
+        Agent 使用建议：
+        - 结果在 `data.items`
+        - 适合在某个分类下浏览文档，或筛出失败文档做修复
+        """
 
         payload = {
             "category_id": category_id,
@@ -61,7 +84,10 @@ def register_document_tools(mcp: Any) -> None:
         }
         return _execute_read(payload=payload, action="list")
 
-    @mcp.tool(name="kb_document_import", description="导入文档并写入向量索引")
+    @mcp.tool(
+        name="kb_document_import",
+        description="兼容路径：直接传文件 base64 导入文档并写入向量索引。远端大文件场景不推荐优先使用。",
+    )
     def kb_document_import(
         category_id: int,
         title: str,
@@ -72,7 +98,13 @@ def register_document_tools(mcp: Any) -> None:
         operator: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """导入文档并构建稠密向量与 BM25 索引。"""
+        """导入文档并构建稠密向量与 BM25 索引。
+
+        Agent 使用建议：
+        - 只适合小文件或兼容场景
+        - `mime_type` 必须和文件类型匹配
+        - 返回结果中会包含导入后的 `document`
+        """
 
         payload = {
             "category_id": category_id,
@@ -86,7 +118,40 @@ def register_document_tools(mcp: Any) -> None:
         }
         return _execute_write(payload)
 
-    @mcp.tool(name="kb_document_delete", description="按主键或文档唯一标识删除文档")
+    @mcp.tool(
+        name="kb_document_import_from_staged",
+        description="标准远端路径：引用 staged_file 导入文档并写入向量索引。",
+    )
+    def kb_document_import_from_staged(
+        category_id: int,
+        title: str,
+        staged_file_id: int,
+        request_id: str | None = None,
+        operator: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """从暂存文件导入文档并构建向量索引。
+
+        Agent 使用建议：
+        - 先通过上传接口获得 `staged_file_id`
+        - 再调用本 Tool 完成真正的知识库导入
+        - 成功后对应暂存文件会被标记为已消费
+        """
+
+        payload = {
+            "category_id": category_id,
+            "title": title,
+            "staged_file_id": staged_file_id,
+            "request_id": request_id,
+            "operator": operator,
+            "trace_id": trace_id,
+        }
+        return _execute_write(payload, action="import_from_staged")
+
+    @mcp.tool(
+        name="kb_document_delete",
+        description="按主键或 document_uid 删除文档，并级联清理切片、向量和源文件。",
+    )
     def kb_document_delete(
         id: int | None = None,
         document_uid: str | None = None,
@@ -94,7 +159,12 @@ def register_document_tools(mcp: Any) -> None:
         operator: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """删除文档，并级联清理切片、向量和原始文件。"""
+        """删除文档，并级联清理切片、向量和原始文件。
+
+        Agent 使用建议：
+        - 删除是高成本操作，会同步处理 PostgreSQL、Milvus 和文件存储
+        - 适合在确定不再需要该文档时调用
+        """
 
         payload = {
             "id": id,
@@ -105,7 +175,10 @@ def register_document_tools(mcp: Any) -> None:
         }
         return _execute_write(payload, action="delete")
 
-    @mcp.tool(name="kb_document_update", description="更新文档元数据，或整篇替换文档并重建切片与向量")
+    @mcp.tool(
+        name="kb_document_update",
+        description="兼容路径：更新文档元数据，或整篇替换 base64 文件并重建切片与向量。",
+    )
     def kb_document_update(
         id: int | None = None,
         document_uid: str | None = None,
@@ -118,7 +191,12 @@ def register_document_tools(mcp: Any) -> None:
         operator: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """更新文档，可仅修改元数据，也可替换源文件触发整篇重建。"""
+        """更新文档，可仅修改元数据，也可替换源文件触发整篇重建。
+
+        Agent 使用建议：
+        - 只改标题/分类时，无需传文件字段
+        - 需要替换文档内容时，必须同时传文件相关字段
+        """
 
         payload = {
             "id": id,
@@ -134,15 +212,52 @@ def register_document_tools(mcp: Any) -> None:
         }
         return _execute_write(payload, action="update")
 
+    @mcp.tool(
+        name="kb_document_update_from_staged",
+        description="标准远端路径：使用 staged_file 整篇替换文档并重建切片与向量。",
+    )
+    def kb_document_update_from_staged(
+        id: int | None = None,
+        document_uid: str | None = None,
+        category_id: int | None = None,
+        title: str | None = None,
+        staged_file_id: int | None = None,
+        request_id: str | None = None,
+        operator: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """通过暂存文件替换源文档内容。
+
+        Agent 使用建议：
+        - 这是远端更新大文件的推荐方式
+        - 更新采用整篇重建，不做局部 patch
+        """
+
+        payload = {
+            "id": id,
+            "document_uid": document_uid,
+            "category_id": category_id,
+            "title": title,
+            "staged_file_id": staged_file_id,
+            "request_id": request_id,
+            "operator": operator,
+            "trace_id": trace_id,
+        }
+        return _execute_write(payload, action="update_from_staged")
+
 
 def _execute_read(*, payload: dict[str, Any], action: str) -> dict[str, Any]:
-    """执行读取类文档 Tool，并统一处理异常响应。"""
+    """执行读取类文档 Tool，并统一处理异常响应。
+
+    读取类 Tool 不会产生副作用，适合 Agent 在编排前探测当前文档状态。
+    """
 
     session = SessionFactory()
     service = DocumentService(
         category_repository=CategoryRepository(session),
         document_repository=DocumentRepository(session),
         chunk_repository=ChunkRepository(session),
+        staged_file_repository=StagedFileRepository(session),
     )
     try:
         if action == "get":
@@ -195,25 +310,35 @@ def _execute_read(*, payload: dict[str, Any], action: str) -> dict[str, Any]:
 
 
 def _execute_write(payload: dict[str, Any], action: str = "import") -> dict[str, Any]:
-    """执行文档导入 Tool，并统一处理异常响应。"""
+    """执行文档写入类 Tool，并统一处理异常响应。
+
+    写入类 Tool 会在成功提交数据库后，再执行必要的文件清理动作。
+    Agent 可以把统一响应中的 `success/code/data` 当作稳定协议使用。
+    """
 
     session = SessionFactory()
     service = DocumentService(
         category_repository=CategoryRepository(session),
         document_repository=DocumentRepository(session),
         chunk_repository=ChunkRepository(session),
+        staged_file_repository=StagedFileRepository(session),
     )
     try:
         if action == "import":
             result = service.import_document(payload)
+        elif action == "import_from_staged":
+            result = service.import_document_from_staged(payload)
         elif action == "update":
             result = service.update_document(payload)
+        elif action == "update_from_staged":
+            result = service.update_document_from_staged(payload)
         elif action == "delete":
             result = service.delete_document(payload)
         else:
             raise RuntimeError(f"unsupported action: {action}")
         session.commit()
         service.clear_import_context()
+        service.finalize_post_commit_cleanup()
     except AppError as exc:
         rollback_error = _rollback_write_action(service=service, action=action, error=exc)
         final_error = rollback_error or exc
@@ -278,7 +403,7 @@ def _execute_write(payload: dict[str, Any], action: str = "import") -> dict[str,
                 request_id=payload.get("request_id"),
                 trace_id=payload.get("trace_id"),
             )
-    if action == "update":
+    if action in {"update", "update_from_staged"}:
         try:
             service.finalize_update_context()
         except Exception as exc:
@@ -308,8 +433,12 @@ def _rollback_write_action(
 
     if action == "import":
         return service.rollback_import_side_effects(original_error=error)
+    if action == "import_from_staged":
+        return service.rollback_import_side_effects(original_error=error)
     if action == "delete":
         return service.rollback_delete_side_effects(original_error=error)
     if action == "update":
+        return service.rollback_update_side_effects(original_error=error)
+    if action == "update_from_staged":
         return service.rollback_update_side_effects(original_error=error)
     return None

@@ -100,6 +100,35 @@ CREATE INDEX IF NOT EXISTS idx_kb_import_task_cancel_requested ON kb_import_task
 CREATE INDEX IF NOT EXISTS idx_kb_import_task_lease_expires_at ON kb_import_task (lease_expires_at);
 CREATE INDEX IF NOT EXISTS idx_kb_import_task_request_id ON kb_import_task (request_id);
 
+CREATE TABLE IF NOT EXISTS kb_staged_file (
+    id BIGSERIAL PRIMARY KEY,
+    staged_file_uid VARCHAR(36) NOT NULL UNIQUE,
+    status VARCHAR(32) NOT NULL DEFAULT 'uploaded',
+    storage_backend VARCHAR(32) NOT NULL DEFAULT 'local',
+    storage_uri VARCHAR(1024) NOT NULL,
+    file_name VARCHAR(256) NOT NULL,
+    mime_type VARCHAR(128) NOT NULL,
+    source_type VARCHAR(32) NOT NULL,
+    file_size BIGINT NOT NULL,
+    file_sha256 VARCHAR(64) NOT NULL,
+    upload_completed_at TIMESTAMP,
+    expires_at TIMESTAMP,
+    consumed_at TIMESTAMP,
+    last_error TEXT,
+    linked_document_id BIGINT REFERENCES kb_document(id),
+    linked_task_id BIGINT REFERENCES kb_import_task(id),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_staged_file_status
+    ON kb_staged_file (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_kb_staged_file_expires_at ON kb_staged_file (expires_at);
+CREATE INDEX IF NOT EXISTS idx_kb_staged_file_file_sha256 ON kb_staged_file (file_sha256);
+CREATE INDEX IF NOT EXISTS idx_kb_staged_file_mime_type ON kb_staged_file (mime_type);
+CREATE INDEX IF NOT EXISTS idx_kb_staged_file_deleted_at ON kb_staged_file (deleted_at);
+
 CREATE TABLE IF NOT EXISTS kb_import_task_item (
     id BIGSERIAL PRIMARY KEY,
     task_id BIGINT NOT NULL REFERENCES kb_import_task(id),
@@ -110,7 +139,7 @@ CREATE TABLE IF NOT EXISTS kb_import_task_item (
     title VARCHAR(256) NOT NULL,
     file_name VARCHAR(256) NOT NULL,
     mime_type VARCHAR(128) NOT NULL,
-    staged_file_uri VARCHAR(1024) NOT NULL,
+    staged_file_id BIGINT NOT NULL REFERENCES kb_staged_file(id),
     file_sha256 VARCHAR(64),
     document_id BIGINT,
     document_uid VARCHAR(36),
@@ -129,3 +158,4 @@ CREATE INDEX IF NOT EXISTS idx_kb_import_task_item_status
     ON kb_import_task_item (status, priority DESC, id ASC);
 CREATE INDEX IF NOT EXISTS idx_kb_import_task_item_task_id ON kb_import_task_item (task_id);
 CREATE INDEX IF NOT EXISTS idx_kb_import_task_item_document_id ON kb_import_task_item (document_id);
+CREATE INDEX IF NOT EXISTS idx_kb_import_task_item_staged_file_id ON kb_import_task_item (staged_file_id);

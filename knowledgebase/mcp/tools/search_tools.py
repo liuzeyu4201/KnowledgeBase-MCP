@@ -13,9 +13,16 @@ from knowledgebase.services.search_service import SearchService
 
 
 def register_search_tools(mcp: Any) -> None:
-    """注册检索相关 MCP Tool。"""
+    """注册检索相关 MCP Tool。
 
-    @mcp.tool(name="kb_search_retrieve", description="执行知识库检索，支持语义检索、BM25 检索和混合检索")
+    检索粒度是 chunk，不是整篇文档。
+    Agent 获得的结果已经过 PostgreSQL 回查，可直接用于问答、引用和后续重排。
+    """
+
+    @mcp.tool(
+        name="kb_search_retrieve",
+        description="执行知识库检索，支持语义检索、BM25 检索和混合检索，并返回结构化 chunk 命中结果。",
+    )
     def kb_search_retrieve(
         query: str,
         alpha: float = 0.0,
@@ -26,7 +33,14 @@ def register_search_tools(mcp: Any) -> None:
         operator: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """执行检索 Tool，并按照统一响应协议返回结果。"""
+        """执行检索 Tool，并按照统一响应协议返回结果。
+
+        Agent 使用建议：
+        - `alpha=0.0` 为纯语义检索
+        - `alpha=1.0` 为纯 BM25 词法检索
+        - 中间值表示混合检索
+        - `category_id` 与 `document_id` 可用于限定检索范围
+        """
 
         payload = {
             "query": query,
@@ -42,7 +56,10 @@ def register_search_tools(mcp: Any) -> None:
 
 
 def _execute_search(payload: dict[str, Any]) -> dict[str, Any]:
-    """执行检索 Tool，并统一处理参数、数据库和系统异常。"""
+    """执行检索 Tool，并统一处理参数、数据库和系统异常。
+
+    返回结果已经过滤掉已删除或状态异常的业务数据，Agent 不需要再自行二次清洗。
+    """
 
     try:
         with session_scope() as session:

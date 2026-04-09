@@ -53,6 +53,23 @@ class DocumentImportInput(BaseModel):
         return normalized
 
 
+class DocumentImportFromStagedInput(BaseModel):
+    request_id: str | None = None
+    operator: str | None = None
+    trace_id: str | None = None
+    category_id: int = Field(gt=0)
+    title: str = Field(min_length=1, max_length=256)
+    staged_file_id: int = Field(gt=0)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def normalize_required_str_from_staged(cls, value: str) -> str:
+        stripped = _strip_or_none(value)
+        if stripped is None:
+            raise ValueError("字段不能为空")
+        return stripped
+
+
 class DocumentGetInput(BaseModel):
     request_id: str | None = None
     trace_id: str | None = None
@@ -121,6 +138,22 @@ class DocumentUpdateInput(BaseModel):
         if not is_supported_document_mime_type(normalized):
             raise ValueError(supported_document_mime_type_message())
         return normalized
+
+
+class DocumentUpdateFromStagedInput(BaseModel):
+    request_id: str | None = None
+    operator: str | None = None
+    trace_id: str | None = None
+    id: int | None = Field(default=None, gt=0)
+    document_uid: str | None = Field(default=None, min_length=1, max_length=36)
+    category_id: int | None = Field(default=None, gt=0)
+    title: str | None = Field(default=None, min_length=1, max_length=256)
+    staged_file_id: int | None = Field(default=None, gt=0)
+
+    @field_validator("document_uid", "title", mode="before")
+    @classmethod
+    def normalize_optional_from_staged_fields(cls, value: str | None) -> str | None:
+        return _strip_or_none(value)
 
 
 class DocumentCategoryOutput(BaseModel):

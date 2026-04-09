@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from docx import Document as DocxDocument
+import httpx
 
 from test.mcp_test_client import MCPToolClient
 
@@ -18,6 +19,7 @@ class MCPIntegrationTestCase(unittest.TestCase):
     """提供统一 MCP 测试入口、样例文件读取和测试辅助能力。"""
 
     server_url = os.getenv("KNOWLEDGEBASE_TEST_SERVER_URL", "http://127.0.0.1:8000/mcp")
+    api_base_url = os.getenv("KNOWLEDGEBASE_TEST_API_BASE_URL", "http://127.0.0.1:8000")
     small_pdf_path = Path(
         os.getenv("KNOWLEDGEBASE_TEST_SMALL_PDF", "/app/data/Functional_Analysis.pdf")
     )
@@ -41,6 +43,12 @@ class MCPIntegrationTestCase(unittest.TestCase):
         pdf_path = self.large_pdf_path if large else self.small_pdf_path
         return base64.b64encode(pdf_path.read_bytes()).decode("utf-8")
 
+    def read_pdf_bytes(self, *, large: bool = False) -> bytes:
+        """读取测试 PDF 原始字节。"""
+
+        pdf_path = self.large_pdf_path if large else self.small_pdf_path
+        return pdf_path.read_bytes()
+
     def read_markdown_base64(self, *, title: str = "Markdown Title") -> str:
         """构造 Markdown 文档并编码为 base64。"""
 
@@ -54,6 +62,19 @@ class MCPIntegrationTestCase(unittest.TestCase):
         )
         return base64.b64encode(markdown.encode("utf-8")).decode("utf-8")
 
+    def read_markdown_bytes(self, *, title: str = "Markdown Title") -> bytes:
+        """构造 Markdown 文档原始字节。"""
+
+        markdown = (
+            f"# {title}\n\n"
+            "这是一个 Markdown 导入测试文档。\n\n"
+            "- 第一条\n"
+            "- 第二条\n\n"
+            "## 子标题\n\n"
+            "线性代数与泛函分析会在这里相遇。"
+        )
+        return markdown.encode("utf-8")
+
     def read_docx_base64(self, *, title: str = "Docx Title") -> str:
         """构造 DOCX 文档并编码为 base64。"""
 
@@ -66,11 +87,44 @@ class MCPIntegrationTestCase(unittest.TestCase):
         document.save(buffer)
         return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
+    def read_docx_bytes(self, *, title: str = "Docx Title") -> bytes:
+        """构造 DOCX 文档原始字节。"""
+
+        document = DocxDocument()
+        document.add_heading(title, level=1)
+        document.add_paragraph("这是一个 Word 导入测试文档。")
+        document.add_paragraph("它包含多段正文，用于验证解析、切片和向量写入链路。")
+        document.add_paragraph("Hilbert space is a complete inner product space.")
+        buffer = BytesIO()
+        document.save(buffer)
+        return buffer.getvalue()
+
     async def tool(self, tool_name: str, **arguments: Any) -> dict[str, Any]:
         """统一调用 MCP Tool。"""
 
         async with MCPToolClient(self.server_url) as client:
             return await client.call_tool(tool_name, arguments)
+
+    def http_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """调用普通 HTTP 接口并返回 JSON。"""
+
+        response = httpx.request(
+            method,
+            f"{self.api_base_url}{path}",
+            params=params,
+            files=files,
+            data=data,
+            timeout=120.0,
+        )
+        return response.json()
 
     def assert_success(self, payload: dict[str, Any], *, code: str = "OK") -> None:
         """断言接口成功返回。"""
@@ -131,6 +185,25 @@ class MCPIntegrationTestCase(unittest.TestCase):
         )
         self.assert_success(payload)
         return payload["data"]["document"]
+
+    def upload_staged_file(
+        self,
+        *,
+        file_name: str,
+        file_bytes: bytes,
+        mime_type: str,
+    ) -> dict[str, Any]:
+        """通过普通 HTTP 上传接口创建暂存文件。"""
+
+        payload = self.http_json(
+            "POST",
+            "/api/staged-files",
+            files={
+                "file": (file_name, file_bytes, mime_type),
+            },
+        )
+        self.assert_success(payload)
+        return payload["data"]["staged_file"]
 
     async def delete_document_best_effort(self, document: dict[str, Any]) -> None:
         """尽最大努力删除测试文档，避免污染共享测试环境。"""

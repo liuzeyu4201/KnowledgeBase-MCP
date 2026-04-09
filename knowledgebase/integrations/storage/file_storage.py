@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from base64 import b64decode
+from io import BufferedReader
 import hashlib
 from pathlib import Path
+from typing import BinaryIO
 from uuid import uuid4
 
 from knowledgebase.app.config import get_settings
@@ -18,6 +20,9 @@ class FileStorage:
         self.root.mkdir(parents=True, exist_ok=True)
         self.task_root = (self.root / "_tasks").resolve()
         self.task_root.mkdir(parents=True, exist_ok=True)
+        self.staged_root = (self.root / "_staged").resolve()
+        self.staged_root.mkdir(parents=True, exist_ok=True)
+        self.upload_chunk_size_bytes = settings.upload_chunk_size_bytes
 
     def save_file(self, *, file_name: str, file_content_base64: str) -> tuple[str, bytes]:
         """保存原始文件并返回文件路径与原始字节内容。"""
@@ -55,6 +60,46 @@ class FileStorage:
         target = self.root / safe_name
         target.write_bytes(file_bytes)
         return str(target), file_bytes
+
+    def save_staged_file_bytes(self, *, file_name: str, file_bytes: bytes) -> tuple[str, int, str]:
+        """把文件字节写入暂存目录，返回路径、大小和摘要。"""
+
+        safe_name = self._build_internal_file_name(
+            prefix=uuid4().hex,
+            original_name=file_name,
+        )
+        target = self.staged_root / safe_name
+        target.write_bytes(file_bytes)
+        return str(target), len(file_bytes), hashlib.sha256(file_bytes).hexdigest()
+
+    def save_staged_file_stream(
+        self,
+        *,
+        file_name: str,
+        file_stream: BinaryIO,
+    ) -> tuple[str, int, str]:
+        """流式写入暂存文件，避免在服务端重复构造整块大字节数组。"""
+
+        safe_name = self._build_internal_file_name(
+            prefix=uuid4().hex,
+            original_name=file_name,
+        )
+        target = self.staged_root / safe_name
+        sha256 = hashlib.sha256()
+        total_size = 0
+
+        # 使用受控块大小写入，避免大文件请求在应用层继续膨胀。
+        with target.open("wb") as output:
+            reader = BufferedReader(file_stream) if not isinstance(file_stream, BufferedReader) else file_stream
+            while True:
+                chunk = reader.read(self.upload_chunk_size_bytes)
+                if not chunk:
+                    break
+                output.write(chunk)
+                sha256.update(chunk)
+                total_size += len(chunk)
+
+        return str(target), total_size, sha256.hexdigest()
 
     def stage_task_file(
         self,

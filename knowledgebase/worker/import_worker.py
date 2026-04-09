@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from uuid import uuid4
 
 from knowledgebase.app.config import get_settings
 from knowledgebase.db.bootstrap import init_schema
 from knowledgebase.db.session import SessionFactory, session_scope
 from knowledgebase.domain.exceptions import AppError
-from knowledgebase.integrations.storage.file_storage import FileStorage
 from knowledgebase.repositories.category_repository import CategoryRepository
 from knowledgebase.repositories.chunk_repository import ChunkRepository
 from knowledgebase.repositories.document_repository import DocumentRepository
 from knowledgebase.repositories.import_task_repository import ImportTaskRepository
+from knowledgebase.repositories.staged_file_repository import StagedFileRepository
 from knowledgebase.services.document_service import DocumentService
 
 
@@ -22,7 +21,6 @@ class ImportTaskWorker:
     def __init__(self) -> None:
         self.settings = get_settings()
         self.worker_token = uuid4().hex
-        self.storage = FileStorage()
 
     def run_forever(self) -> None:
         """持续轮询 PostgreSQL 任务表并执行批量导入任务。"""
@@ -122,6 +120,7 @@ class ImportTaskWorker:
     def _process_item(self, *, task_id: int, item_id: int, lease_token: str) -> None:
         """执行单个文档导入子项，并维护任务状态与重试逻辑。"""
 
+        document_service: DocumentService | None = None
         with session_scope() as session:
             task_repository = ImportTaskRepository(session)
             item = task_repository.get_item_for_execution(
@@ -133,25 +132,23 @@ class ImportTaskWorker:
             if item is None or task is None:
                 return
 
-            file_bytes = self.storage.read_file_bytes(item.staged_file_uri)
             document_service = DocumentService(
                 category_repository=CategoryRepository(session),
                 document_repository=DocumentRepository(session),
                 chunk_repository=ChunkRepository(session),
+                staged_file_repository=StagedFileRepository(session),
             )
 
             try:
-                result = document_service.import_document_from_bytes(
+                result = document_service.import_document_from_staged(
                     {
                         "category_id": item.category_id,
                         "title": item.title,
-                        "file_name": item.file_name,
-                        "mime_type": item.mime_type,
+                        "staged_file_id": item.staged_file_id,
                         "request_id": task.request_id,
                         "operator": task.operator,
                         "trace_id": task.trace_id,
                     },
-                    file_bytes=file_bytes,
                     cancellation_checker=self._build_cancellation_checker(
                         task_id=task_id,
                         item_id=item_id,
@@ -185,10 +182,8 @@ class ImportTaskWorker:
                 )
 
             task_repository.refresh_task_aggregate(task)
-
-        if item.status in {"success", "failed", "canceled"}:
-            self.storage.delete_file(item.staged_file_uri)
-            self._cleanup_task_dir_if_empty(item.staged_file_uri)
+        if document_service is not None:
+            document_service.finalize_post_commit_cleanup()
 
     def _handle_item_error(
         self,
@@ -254,13 +249,6 @@ class ImportTaskWorker:
                 return task.cancel_requested
 
         return checker
-
-    def _cleanup_task_dir_if_empty(self, file_path: str) -> None:
-        """顺手清理空任务目录，避免长期堆积。"""
-
-        task_dir = Path(file_path).resolve().parent
-        if task_dir.exists() and task_dir.is_dir() and not any(task_dir.iterdir()):
-            task_dir.rmdir()
 
 
 def run() -> None:

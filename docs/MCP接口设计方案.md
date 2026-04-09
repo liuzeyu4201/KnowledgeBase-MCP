@@ -2,7 +2,7 @@
 
 ## 1. 文档目的
 
-本文档以当前代码实现为准，定义知识库 MCP Server 已经实现的 MCP Tool、输入输出结构、执行语义、错误处理方式与数据约束。
+本文档以当前代码实现和已确认的下一步标准方案为准，定义知识库系统对外接口、MCP Tool、输入输出结构、执行语义、错误处理方式与数据约束。
 
 当前已实现接口：
 
@@ -20,6 +20,19 @@
 - `kb_document_update`
 - `kb_document_delete`
 - `kb_search_retrieve`
+
+已确认并将作为远端标准路径推进的接口：
+
+- 非 MCP 上传接口：`POST /api/staged-files`
+- 非 MCP 查询接口：`GET /api/staged-files/{staged_file_id}`
+- 非 MCP 列表接口：`GET /api/staged-files`
+- 非 MCP 删除接口：`DELETE /api/staged-files/{staged_file_id}`
+- `kb_document_import_from_staged`
+- `kb_document_update_from_staged`
+- `kb_document_import_batch_submit_from_staged`
+- `kb_staged_file_get`
+- `kb_staged_file_list`
+- `kb_staged_file_delete`
 
 ---
 
@@ -168,11 +181,16 @@
 | `UPDATE_CLEANUP_FAILED` | `system_error` | 文档已更新但旧文件清理失败 |
 | `CONSISTENCY_ROLLBACK_FAILED` | `system_error` | 跨存储回滚失败 |
 | `DELETE_FILE_STAGE_FAILED` | `system_error` | 删除前文件暂存失败 |
+| `STAGED_FILE_NOT_FOUND` | `not_found` | 暂存文件不存在 |
+| `STAGED_FILE_EXPIRED` | `business_error` | 暂存文件已过期 |
+| `STAGED_FILE_ALREADY_CONSUMED` | `business_error` | 暂存文件已被消费 |
+| `STAGED_FILE_STATUS_INVALID` | `business_error` | 暂存文件状态不允许当前操作 |
+| `STAGED_FILE_UPLOAD_FAILED` | `system_error` | 文件上传或落存失败 |
 
 说明：
 
 - `file_content_base64` 非法时，当前返回 `INVALID_ARGUMENT`
-- `mime_type` 非 `application/pdf` 时，当前返回 `INVALID_ARGUMENT`
+- `mime_type` 不在受支持类型集合中时，当前返回 `INVALID_ARGUMENT`
 
 ### 2.5.4 批量导入任务相关错误码
 
@@ -213,13 +231,14 @@
 | `category_id` | 正整数，且分类必须存在 |
 | `title` | `1~256` 字符 |
 | `file_name` | `1~256` 字符 |
-| `mime_type` | 当前仅允许 `application/pdf` |
-| `file_content_base64` | 必填时必须能被正确解码且内容非空 |
+| `mime_type` | 当前支持 `application/pdf`、`application/vnd.openxmlformats-officedocument.wordprocessingml.document`、`text/markdown`、`text/x-markdown` |
+| `file_content_base64` | 兼容路径下必填时必须能被正确解码且内容非空 |
 | `document_uid` | `1~36` 字符 |
 
 补充说明：
 
-- 当前代码不接受“本地路径导入”，只接受 `file_content_base64`
+- 当前代码仍保留 `file_content_base64` 兼容路径
+- 远端标准路径应改为“先上传暂存文件，再通过 `from_staged` 接口导入”
 - 更新文档时，如果传 `file_content_base64`，则 `file_name` 和 `mime_type` 必须同时传入
 
 ---
@@ -252,22 +271,223 @@
 | `items[].category_id` | 正整数 |
 | `items[].title` | `1~256` 字符 |
 | `items[].file_name` | `1~256` 字符 |
-| `items[].mime_type` | 当前仅支持 `application/pdf` |
-| `items[].file_content_base64` | 必填，必须可正确解码 |
+| `items[].mime_type` | 当前支持 `application/pdf`、`application/vnd.openxmlformats-officedocument.wordprocessingml.document`、`text/markdown`、`text/x-markdown` |
+| `items[].file_content_base64` | 当前兼容路径下必填，必须可正确解码 |
 | `items[].priority` | 可选，`0~1000` |
 
 补充说明：
 
 - 当前批量导入接口先将文件写入任务暂存目录，不直接把大体积文件内容持久化到数据库
+- 远端标准路径应改为 `items[].staged_file_id`
 - 任务查询默认返回子任务明细，除非显式指定 `include_items=false`
+
+---
+
+## 3.5 暂存文件字段约束
+
+| 字段 | 约束 |
+|---|---|
+| `staged_file_id` | 正整数 |
+| `file` | 通过 `multipart/form-data` 传输，不能为空 |
+| `mime_type` | 由服务端识别或校验，必须在受支持类型集合内 |
+| `file_size` | 由服务端计算，不接受调用方伪造 |
+| `status` | `uploaded / consuming / consumed / expired / deleted / failed` |
+| `expires_at` | 可选，由服务端按默认 TTL 生成，或按受控参数覆盖 |
+
+补充说明：
+
+- 暂存文件不是最终知识文档
+- 上传成功不等于导入成功
+- `staged_file_id` 是远端标准导入路径的唯一文件引用
 
 ---
 
 ## 4. Tool 设计
 
-## 4.1 分类接口
+### 4.0 远端标准路径说明
 
-### 4.1.1 `kb_category_create`
+远端部署下，标准文件导入路径应拆为两步：
+
+1. 先通过普通 HTTP 上传接口上传原始文件，获得 `staged_file_id`
+2. 再通过 MCP Tool 调用 `*_from_staged` 接口执行导入、更新或批量导入
+
+设计约束：
+
+- MCP Tool 不再承载大体积文件 `base64`
+- 上传接口负责接收文件、落存、创建暂存文件记录
+- MCP Tool 负责知识库业务动作，不负责文件传输
+
+兼容策略：
+
+- 当前已实现的 `file_content_base64` 路径保留，用于小文件兼容与内部调用
+- 面向远端 Agent 的标准接入路径统一收敛到 `staged_file_id`
+
+---
+
+## 4.1 配套上传接口
+
+### 4.1.1 `POST /api/staged-files`
+
+用途：
+
+- 通过普通 HTTP 上传接口接收原始文件
+- 创建一条 `staged_file` 记录
+
+请求方式：
+
+- `multipart/form-data`
+
+表单字段：
+
+| 字段名 | 类型 | 必填 | 说明 |
+|---|---|---:|---|
+| `file` | `binary` | 是 | 原始文件流 |
+| `request_id` | `string` | 否 | 请求标识 |
+| `operator` | `string` | 否 | 操作主体 |
+| `trace_id` | `string` | 否 | 链路追踪 |
+
+执行语义：
+
+- 服务端边接收边写入对象存储或本地受控目录
+- 计算 `file_size`、`file_sha256`
+- 校验 `mime_type` 和来源类型
+- 创建 `kb_staged_file`
+- 返回 `staged_file`
+
+成功返回：
+
+- `staged_file_id`
+- `staged_file_uid`
+- `file_name`
+- `mime_type`
+- `source_type`
+- `file_size`
+- `file_sha256`
+- `status=uploaded`
+- `expires_at`
+
+主要错误码：
+
+- `INVALID_ARGUMENT`
+- `STAGED_FILE_UPLOAD_FAILED`
+
+---
+
+### 4.1.2 `GET /api/staged-files/{staged_file_id}`
+
+用途：
+
+- 查询单个暂存文件信息
+
+成功返回：
+
+- `staged_file`
+
+主要错误码：
+
+- `STAGED_FILE_NOT_FOUND`
+
+---
+
+### 4.1.3 `GET /api/staged-files`
+
+用途：
+
+- 分页查询暂存文件列表
+
+建议过滤条件：
+
+- `status`
+- `mime_type`
+- `linked_document_id`
+- `created_at_from`
+- `created_at_to`
+
+---
+
+### 4.1.4 `DELETE /api/staged-files/{staged_file_id}`
+
+用途：
+
+- 删除未消费或已过期的暂存文件
+
+执行语义：
+
+- 删除前校验状态不处于 `consuming`
+- 同步删除物理文件和 `kb_staged_file` 记录，或标记为 `deleted`
+
+主要错误码：
+
+- `STAGED_FILE_NOT_FOUND`
+- `STAGED_FILE_STATUS_INVALID`
+
+---
+
+### 4.1.5 `kb_staged_file_get`
+
+用途：
+
+- 通过 MCP Tool 查询单个暂存文件信息
+
+输入参数：
+
+| 字段名 | 类型 | 必填 | 说明 |
+|---|---|---:|---|
+| `id` | `integer` | 否 | 暂存文件主键 |
+| `staged_file_uid` | `string` | 否 | 稳定暂存文件标识 |
+| `request_id` | `string` | 否 | 请求标识 |
+| `trace_id` | `string` | 否 | 链路追踪 |
+
+主要错误码：
+
+- `INVALID_ARGUMENT`
+- `STAGED_FILE_NOT_FOUND`
+
+---
+
+### 4.1.6 `kb_staged_file_list`
+
+用途：
+
+- 通过 MCP Tool 分页查询暂存文件列表
+
+建议过滤条件：
+
+- `status`
+- `mime_type`
+- `linked_document_id`
+- `page`
+- `page_size`
+
+---
+
+### 4.1.7 `kb_staged_file_delete`
+
+用途：
+
+- 通过 MCP Tool 删除未消费或已过期的暂存文件
+
+输入参数：
+
+| 字段名 | 类型 | 必填 | 说明 |
+|---|---|---:|---|
+| `id` | `integer` | 否 | 暂存文件主键 |
+| `staged_file_uid` | `string` | 否 | 稳定暂存文件标识 |
+| `request_id` | `string` | 否 | 请求标识 |
+| `operator` | `string` | 否 | 操作主体 |
+| `trace_id` | `string` | 否 | 链路追踪 |
+
+主要错误码：
+
+- `INVALID_ARGUMENT`
+- `STAGED_FILE_NOT_FOUND`
+- `STAGED_FILE_STATUS_INVALID`
+
+---
+
+## 4.2 分类接口
+
+### 4.2.1 `kb_category_create`
 
 用途：
 
@@ -304,7 +524,7 @@
 
 ---
 
-### 4.1.2 `kb_category_get`
+### 4.2.2 `kb_category_get`
 
 用途：
 
@@ -336,7 +556,7 @@
 
 ---
 
-### 4.1.3 `kb_category_list`
+### 4.2.3 `kb_category_list`
 
 用途：
 
@@ -371,7 +591,7 @@
 
 ---
 
-### 4.1.4 `kb_category_update`
+### 4.2.4 `kb_category_update`
 
 用途：
 
@@ -410,7 +630,7 @@
 
 ---
 
-### 4.1.5 `kb_category_delete`
+### 4.2.5 `kb_category_delete`
 
 用途：
 
@@ -446,13 +666,142 @@
 
 ---
 
-## 4.2 文档接口
+## 4.3 文档接口
 
-### 4.2.1 `kb_document_import`
+### 4.3.1 `kb_document_import_from_staged`
 
 用途：
 
-- 导入 PDF 文档并写入切片与检索索引
+- 使用 `staged_file_id` 导入单个文档
+
+输入参数：
+
+| 字段名 | 类型 | 必填 | 说明 |
+|---|---|---:|---|
+| `category_id` | `integer` | 是 | 分类 ID |
+| `title` | `string` | 是 | 文档标题 |
+| `staged_file_id` | `integer` | 是 | 暂存文件 ID |
+| `request_id` | `string` | 否 | 请求标识 |
+| `operator` | `string` | 否 | 操作主体 |
+| `trace_id` | `string` | 否 | 链路追踪 |
+
+执行语义：
+
+- 校验分类存在
+- 锁定 `kb_staged_file`
+- 校验状态为 `uploaded`
+- 读取暂存文件并执行解析、切片、写库、写 Milvus
+- 成功后将暂存文件标记为 `consumed`
+
+成功返回：
+
+- `data.document`
+- `data.chunks.count`
+- `data.vector_store`
+
+主要错误码：
+
+- `INVALID_ARGUMENT`
+- `CATEGORY_NOT_FOUND`
+- `STAGED_FILE_NOT_FOUND`
+- `STAGED_FILE_EXPIRED`
+- `STAGED_FILE_ALREADY_CONSUMED`
+- `DOCUMENT_PARSE_FAILED`
+- `DOCUMENT_IMPORT_FAILED`
+- `CONSISTENCY_ROLLBACK_FAILED`
+
+---
+
+### 4.3.2 `kb_document_import_batch_submit_from_staged`
+
+用途：
+
+- 基于一组 `staged_file_id` 提交批量导入异步任务
+
+输入参数：
+
+| 字段名 | 类型 | 必填 | 说明 |
+|---|---|---:|---|
+| `items` | `array<object>` | 是 | 批量导入子项 |
+| `priority` | `integer` | 否 | 任务优先级，默认 `50` |
+| `max_attempts` | `integer` | 否 | 最大尝试次数，默认 `3` |
+| `idempotency_key` | `string` | 否 | 幂等键 |
+| `request_id` | `string` | 否 | 请求标识 |
+| `operator` | `string` | 否 | 操作主体 |
+| `trace_id` | `string` | 否 | 链路追踪 |
+
+`items[]` 字段：
+
+| 字段名 | 类型 | 必填 | 说明 |
+|---|---|---:|---|
+| `category_id` | `integer` | 是 | 分类 ID |
+| `title` | `string` | 是 | 文档标题 |
+| `staged_file_id` | `integer` | 是 | 暂存文件 ID |
+| `priority` | `integer` | 否 | 子任务优先级，默认继承主任务优先级 |
+
+执行语义：
+
+- 校验全部 `staged_file_id` 存在且状态允许被消费
+- 创建主任务和子任务记录
+- 子任务仅引用暂存文件，不再直接携带文件内容
+- 实际导入由后台 worker 异步执行
+
+主要错误码：
+
+- `INVALID_ARGUMENT`
+- `STAGED_FILE_NOT_FOUND`
+- `STAGED_FILE_STATUS_INVALID`
+- `DB_ERROR`
+
+---
+
+### 4.3.3 `kb_document_update_from_staged`
+
+用途：
+
+- 使用 `staged_file_id` 替换文档源文件并执行整篇重建
+
+输入参数：
+
+| 字段名 | 类型 | 必填 | 说明 |
+|---|---|---:|---|
+| `id` | `integer` | 否 | 文档主键 |
+| `document_uid` | `string` | 否 | 文档稳定标识 |
+| `category_id` | `integer` | 否 | 新分类 ID |
+| `title` | `string` | 否 | 新标题 |
+| `staged_file_id` | `integer` | 否 | 新暂存文件 ID |
+| `request_id` | `string` | 否 | 请求标识 |
+| `operator` | `string` | 否 | 操作主体 |
+| `trace_id` | `string` | 否 | 链路追踪 |
+
+执行语义：
+
+- `id` 和 `document_uid` 至少传一个
+- 至少需要一个更新字段
+- 若传 `staged_file_id`，则按整篇重建更新文档内容
+- 成功后文档 `version + 1`
+- 成功后将暂存文件标记为 `consumed`
+
+主要错误码：
+
+- `INVALID_ARGUMENT`
+- `DOCUMENT_NOT_FOUND`
+- `CATEGORY_NOT_FOUND`
+- `STAGED_FILE_NOT_FOUND`
+- `STAGED_FILE_EXPIRED`
+- `STAGED_FILE_ALREADY_CONSUMED`
+- `DOCUMENT_UPDATE_FAILED`
+- `UPDATE_CLEANUP_FAILED`
+- `CONSISTENCY_ROLLBACK_FAILED`
+
+---
+
+### 4.3.4 `kb_document_import`
+
+用途：
+
+- 兼容路径：直接通过 `file_content_base64` 导入单个文档
+- 该接口适合小文件，不作为远端标准路径
 
 输入参数：
 
@@ -461,8 +810,8 @@
 | `category_id` | `integer` | 是 | 分类 ID |
 | `title` | `string` | 是 | 文档标题 |
 | `file_name` | `string` | 是 | 文件名 |
-| `mime_type` | `string` | 是 | 当前仅支持 `application/pdf` |
-| `file_content_base64` | `string` | 是 | PDF 内容 Base64 |
+| `mime_type` | `string` | 是 | 当前支持 `pdf/docx/md` 对应 MIME |
+| `file_content_base64` | `string` | 是 | 文档内容 Base64 |
 | `request_id` | `string` | 否 | 请求标识 |
 | `operator` | `string` | 否 | 操作主体 |
 | `trace_id` | `string` | 否 | 链路追踪 |
@@ -470,9 +819,9 @@
 执行语义：
 
 - 校验分类存在
-- 保存原始 PDF
+- 保存原始文件
 - 创建文档记录
-- 解析 PDF
+- 按 `mime_type` 解析文件
 - 切片并写入 `kb_chunk`
 - 生成稠密向量
 - 写入 Milvus
@@ -502,7 +851,7 @@
 
 ---
 
-### 4.2.2 `kb_document_import_batch_submit`
+### 4.3.5 `kb_document_import_batch_submit`
 
 用途：
 
@@ -527,8 +876,8 @@
 | `category_id` | `integer` | 是 | 分类 ID |
 | `title` | `string` | 是 | 文档标题 |
 | `file_name` | `string` | 是 | 文件名 |
-| `mime_type` | `string` | 是 | 当前仅支持 `application/pdf` |
-| `file_content_base64` | `string` | 是 | PDF 内容 Base64 |
+| `mime_type` | `string` | 是 | 当前支持 `pdf/docx/md` 对应 MIME |
+| `file_content_base64` | `string` | 是 | 文档内容 Base64 |
 | `priority` | `integer` | 否 | 子任务优先级，默认继承主任务优先级 |
 
 执行语义：
@@ -558,7 +907,7 @@
 
 ---
 
-### 4.2.3 `kb_document_import_batch_cancel`
+### 4.3.6 `kb_document_import_batch_cancel`
 
 用途：
 
@@ -593,7 +942,7 @@
 
 ---
 
-### 4.2.4 `kb_document_import_batch_get`
+### 4.3.7 `kb_document_import_batch_get`
 
 用途：
 
@@ -636,7 +985,7 @@
 
 ---
 
-### 4.2.5 `kb_document_get`
+### 4.3.8 `kb_document_get`
 
 用途：
 
@@ -680,7 +1029,7 @@
 
 ---
 
-### 4.2.6 `kb_document_list`
+### 4.3.9 `kb_document_list`
 
 用途：
 
@@ -718,12 +1067,12 @@
 
 ---
 
-### 4.2.7 `kb_document_update`
+### 4.3.10 `kb_document_update`
 
 用途：
 
 - 更新文档元数据
-- 或整篇替换 PDF 并重建切片与向量
+- 或整篇替换源文件并重建切片与向量
 
 输入参数：
 
@@ -734,8 +1083,8 @@
 | `category_id` | `integer` | 否 | 新分类 ID |
 | `title` | `string` | 否 | 新标题 |
 | `file_name` | `string` | 否 | 新文件名 |
-| `mime_type` | `string` | 否 | 当前仅支持 `application/pdf` |
-| `file_content_base64` | `string` | 否 | 新 PDF 内容 |
+| `mime_type` | `string` | 否 | 当前支持 `pdf/docx/md` 对应 MIME |
+| `file_content_base64` | `string` | 否 | 新文件内容 |
 | `request_id` | `string` | 否 | 请求标识 |
 | `operator` | `string` | 否 | 操作主体 |
 | `trace_id` | `string` | 否 | 链路追踪 |
@@ -746,7 +1095,7 @@
 - 至少需要一个更新字段
 - 只更新元数据时，仅更新 `category_id`、`title`
 - 如果传 `file_content_base64`，则必须同时传 `file_name` 和 `mime_type`
-- 替换 PDF 时采用整篇重建
+- 替换源文件时采用整篇重建
 - 成功后文档 `version + 1`
 
 成功返回：
@@ -767,7 +1116,7 @@
 
 ---
 
-### 4.2.8 `kb_document_delete`
+### 4.3.11 `kb_document_delete`
 
 用途：
 
@@ -806,9 +1155,9 @@
 
 ---
 
-## 4.3 检索接口
+## 4.4 检索接口
 
-### 4.3.1 `kb_search_retrieve`
+### 4.4.1 `kb_search_retrieve`
 
 用途：
 

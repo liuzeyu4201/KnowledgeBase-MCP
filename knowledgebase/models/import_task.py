@@ -60,6 +60,7 @@ class ImportTaskItemModel(Base):
         Index("idx_kb_import_task_item_status", "status", "priority", "id"),
         Index("idx_kb_import_task_item_task_id", "task_id"),
         Index("idx_kb_import_task_item_document_id", "document_id"),
+        Index("idx_kb_import_task_item_staged_file_id", "staged_file_id"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
@@ -71,7 +72,7 @@ class ImportTaskItemModel(Base):
     title: Mapped[str] = mapped_column(String(256))
     file_name: Mapped[str] = mapped_column(String(256))
     mime_type: Mapped[str] = mapped_column(String(128))
-    staged_file_uri: Mapped[str] = mapped_column(String(1024))
+    staged_file_id: Mapped[int] = mapped_column(BIGINT, ForeignKey("kb_staged_file.id"), index=True)
     file_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     document_id: Mapped[int | None] = mapped_column(BIGINT, nullable=True, index=True)
     document_uid: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
@@ -85,3 +86,4 @@ class ImportTaskItemModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     task = relationship("ImportTaskModel", back_populates="items")
+    staged_file = relationship("StagedFileModel")

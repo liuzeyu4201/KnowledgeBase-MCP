@@ -36,6 +36,8 @@ class Settings:
     task_worker_lease_seconds: int
     task_worker_heartbeat_interval_seconds: float
     task_worker_batch_size: int
+    staged_file_ttl_seconds: int
+    upload_chunk_size_bytes: int
 
 
 @lru_cache(maxsize=1)
@@ -106,5 +108,11 @@ def get_settings() -> Settings:
         ),
         task_worker_batch_size=int(
             os.getenv("KNOWLEDGEBASE_TASK_WORKER_BATCH_SIZE", "1")
+        ),
+        staged_file_ttl_seconds=int(
+            os.getenv("KNOWLEDGEBASE_STAGED_FILE_TTL_SECONDS", "604800")
+        ),
+        upload_chunk_size_bytes=int(
+            os.getenv("KNOWLEDGEBASE_UPLOAD_CHUNK_SIZE_BYTES", "1048576")
         ),
     )

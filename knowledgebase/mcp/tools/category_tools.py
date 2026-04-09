@@ -13,9 +13,16 @@ from knowledgebase.services.category_service import CategoryService
 
 
 def register_category_tools(mcp: Any) -> None:
-    """注册分类相关 MCP Tool。"""
+    """注册分类相关 MCP Tool。
 
-    @mcp.tool(name="kb_category_create", description="新增知识分类")
+    这些 Tool 面向 Agent 暴露稳定的分类管理能力。
+    Agent 应优先把分类当作文档归属维度来使用，而不是把分类名硬编码到文档内容里。
+    """
+
+    @mcp.tool(
+        name="kb_category_create",
+        description="新增知识分类。适合在导入文档前先创建业务分类，返回 category 详情。",
+    )
     def kb_category_create(
         category_code: str,
         name: str,
@@ -25,7 +32,13 @@ def register_category_tools(mcp: Any) -> None:
         operator: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """创建分类并返回分类详情。"""
+        """创建分类并返回分类详情。
+
+        Agent 使用建议：
+        - `category_code` 作为稳定机器标识，后续接口优先传这个值或返回的 `id`
+        - `name` 用于面向用户展示
+        - 重复 `category_code` 或非法编码会返回业务错误
+        """
 
         payload = {
             "category_code": category_code,
@@ -38,14 +51,22 @@ def register_category_tools(mcp: Any) -> None:
         }
         return _execute_write(payload=payload, action="create")
 
-    @mcp.tool(name="kb_category_get", description="按主键或分类编码查询分类详情")
+    @mcp.tool(
+        name="kb_category_get",
+        description="按主键或分类编码查询分类详情。适合在导入、更新、删除前确认分类是否存在。",
+    )
     def kb_category_get(
         id: int | None = None,
         category_code: str | None = None,
         request_id: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """读取单个分类详情。"""
+        """读取单个分类详情。
+
+        Agent 使用建议：
+        - `id` 与 `category_code` 二选一即可
+        - 如果两者都不传，会返回参数错误
+        """
 
         payload = {
             "id": id,
@@ -55,7 +76,10 @@ def register_category_tools(mcp: Any) -> None:
         }
         return _execute_read(payload=payload, action="get")
 
-    @mcp.tool(name="kb_category_update", description="更新知识分类")
+    @mcp.tool(
+        name="kb_category_update",
+        description="更新知识分类。支持改编码、名称、描述和状态，返回更新后的 category。",
+    )
     def kb_category_update(
         id: int | None = None,
         category_code: str | None = None,
@@ -67,7 +91,13 @@ def register_category_tools(mcp: Any) -> None:
         operator: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """更新分类并返回最新分类详情。"""
+        """更新分类并返回最新分类详情。
+
+        Agent 使用建议：
+        - 用 `id` 或 `category_code` 定位目标分类
+        - `new_category_code` 用于修改稳定编码
+        - 只传需要修改的字段
+        """
 
         payload = {
             "id": id,
@@ -82,7 +112,10 @@ def register_category_tools(mcp: Any) -> None:
         }
         return _execute_write(payload=payload, action="update")
 
-    @mcp.tool(name="kb_category_delete", description="删除知识分类")
+    @mcp.tool(
+        name="kb_category_delete",
+        description="删除知识分类。当前为软删除；若分类下仍有文档会拒绝删除。",
+    )
     def kb_category_delete(
         id: int | None = None,
         category_code: str | None = None,
@@ -90,7 +123,12 @@ def register_category_tools(mcp: Any) -> None:
         operator: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """删除分类，当前采用软删除。"""
+        """删除分类，当前采用软删除。
+
+        Agent 使用建议：
+        - 删除前最好先确认该分类下没有活动文档
+        - 删除成功后不会再出现在默认列表中
+        """
 
         payload = {
             "id": id,
@@ -101,7 +139,10 @@ def register_category_tools(mcp: Any) -> None:
         }
         return _execute_write(payload=payload, action="delete")
 
-    @mcp.tool(name="kb_category_list", description="分页查询分类列表")
+    @mcp.tool(
+        name="kb_category_list",
+        description="分页查询分类列表。适合给 Agent 做分类选择、遍历和管理。",
+    )
     def kb_category_list(
         category_code: str | None = None,
         name: str | None = None,
@@ -111,7 +152,12 @@ def register_category_tools(mcp: Any) -> None:
         request_id: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """按过滤条件分页查询分类列表。"""
+        """按过滤条件分页查询分类列表。
+
+        Agent 使用建议：
+        - 默认返回分页结构，结果在 `data.items`
+        - `page_size` 不要设置过大，避免无意义地拉全量
+        """
 
         payload = {
             "category_code": category_code,

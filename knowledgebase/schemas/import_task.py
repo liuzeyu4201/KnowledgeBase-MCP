@@ -51,6 +51,21 @@ class ImportTaskSubmitItemInput(BaseModel):
         return normalized
 
 
+class ImportTaskSubmitFromStagedItemInput(BaseModel):
+    category_id: int = Field(gt=0)
+    title: str = Field(min_length=1, max_length=256)
+    staged_file_id: int = Field(gt=0)
+    priority: int | None = Field(default=None, ge=0, le=1000)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def normalize_required_str_from_staged(cls, value: str) -> str:
+        stripped = _strip_or_none(value)
+        if stripped is None:
+            raise ValueError("字段不能为空")
+        return stripped
+
+
 class ImportTaskSubmitInput(BaseModel):
     request_id: str | None = None
     operator: str | None = None
@@ -63,6 +78,21 @@ class ImportTaskSubmitInput(BaseModel):
     @field_validator("idempotency_key", mode="before")
     @classmethod
     def normalize_idempotency_key(cls, value: str | None) -> str | None:
+        return _strip_or_none(value)
+
+
+class ImportTaskSubmitFromStagedInput(BaseModel):
+    request_id: str | None = None
+    operator: str | None = None
+    trace_id: str | None = None
+    idempotency_key: str | None = Field(default=None, max_length=128)
+    priority: int = Field(default=50, ge=0, le=1000)
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    items: list[ImportTaskSubmitFromStagedItemInput] = Field(min_length=1, max_length=100)
+
+    @field_validator("idempotency_key", mode="before")
+    @classmethod
+    def normalize_idempotency_key_from_staged(cls, value: str | None) -> str | None:
         return _strip_or_none(value)
 
 
@@ -101,6 +131,7 @@ class ImportTaskItemOutput(BaseModel):
     title: str
     file_name: str
     mime_type: str
+    staged_file_id: int | None = None
     file_sha256: str | None
     document_id: int | None
     document_uid: str | None
@@ -122,6 +153,7 @@ class ImportTaskItemOutput(BaseModel):
             title=model.title,
             file_name=model.file_name,
             mime_type=model.mime_type,
+            staged_file_id=getattr(model, "staged_file_id", None),
             file_sha256=model.file_sha256,
             document_id=model.document_id,
             document_uid=model.document_uid,

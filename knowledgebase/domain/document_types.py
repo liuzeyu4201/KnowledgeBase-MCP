@@ -7,6 +7,13 @@ SUPPORTED_DOCUMENT_MIME_TYPES: dict[str, str] = {
     "text/x-markdown": "md",
 }
 
+SUPPORTED_DOCUMENT_SUFFIX_MIME_TYPES: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+}
+
 
 def normalize_document_mime_type(value: str) -> str:
     """标准化文档 MIME 类型，统一小写并去掉首尾空白。"""
@@ -35,3 +42,18 @@ def supported_document_mime_type_message() -> str:
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document, "
         "text/markdown, text/x-markdown"
     )
+
+
+def infer_document_mime_type(*, file_name: str, provided_mime_type: str | None) -> str:
+    """优先使用显式 MIME 类型，缺失或为通用类型时再按文件后缀推断。"""
+
+    if provided_mime_type:
+        normalized = normalize_document_mime_type(provided_mime_type)
+        if normalized not in {"application/octet-stream", "binary/octet-stream"}:
+            return normalized
+
+    lowered_name = file_name.strip().lower()
+    for suffix, mime_type in SUPPORTED_DOCUMENT_SUFFIX_MIME_TYPES.items():
+        if lowered_name.endswith(suffix):
+            return mime_type
+    return normalize_document_mime_type(provided_mime_type or "")

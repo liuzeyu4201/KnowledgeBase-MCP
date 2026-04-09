@@ -5,10 +5,12 @@ description = "KnowledgeBase MCP Server"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "fastapi>=0.115.0",
     "mcp>=1.8.0",
     "httpx>=0.28.0",
     "pymilvus>=2.6.0",
     "pypdf>=5.4.0",
+    "python-multipart>=0.0.20",
     "python-docx>=1.1.2",
     "pydantic>=2.11.0",
     "psycopg[binary]>=3.2.0",
