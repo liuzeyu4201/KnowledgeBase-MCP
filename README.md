@@ -2,9 +2,10 @@
 
 面向知识库场景的 MCP Server。当前实现基于 `Python + uv + PostgreSQL + Milvus`，用于给上层 Agent 提供稳定的知识库管理与检索能力。
 
+许可证：`Apache-2.0`，见 [LICENSE](LICENSE)。
+
 ## 项目定位
 
-本项目不是单机脚本，也不是只做向量检索的 Demo。
 
 当前实现目标：
 
