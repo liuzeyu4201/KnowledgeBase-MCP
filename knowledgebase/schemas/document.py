@@ -112,6 +112,22 @@ class DocumentDeleteInput(BaseModel):
         return _strip_or_none(value)
 
 
+class DocumentContentGetInput(BaseModel):
+    request_id: str | None = None
+    trace_id: str | None = None
+    id: int | None = Field(default=None, gt=0)
+    document_uid: str | None = Field(default=None, min_length=1, max_length=36)
+    source_page: int = Field(default=1, ge=1)
+    source_page_size: int = Field(default=1, ge=1, le=20)
+    chunk_page: int = Field(default=1, ge=1)
+    chunk_page_size: int = Field(default=5, ge=1, le=50)
+
+    @field_validator("document_uid", mode="before")
+    @classmethod
+    def normalize_document_uid(cls, value: str | None) -> str | None:
+        return _strip_or_none(value)
+
+
 class DocumentUpdateFromStagedInput(BaseModel):
     request_id: str | None = None
     operator: str | None = None
@@ -185,3 +201,44 @@ class DocumentOutput(BaseModel):
             updated_at=model.updated_at,
             category=DocumentCategoryOutput.from_model(category) if category is not None else None,
         )
+
+
+class DocumentSourcePageOutput(BaseModel):
+    page_no: int
+    content: str
+
+
+class DocumentChunkContentOutput(BaseModel):
+    id: int
+    chunk_uid: str
+    chunk_no: int
+    page_no: int | None
+    char_start: int | None
+    char_end: int | None
+    token_count: int | None
+    content: str
+    vector_status: str
+
+    @classmethod
+    def from_model(cls, model: object) -> "DocumentChunkContentOutput":
+        return cls(
+            id=model.id,
+            chunk_uid=model.chunk_uid,
+            chunk_no=model.chunk_no,
+            page_no=model.page_no,
+            char_start=model.char_start,
+            char_end=model.char_end,
+            token_count=model.token_count,
+            content=model.content,
+            vector_status=model.vector_status,
+        )
+
+
+class DocumentContentOutput(BaseModel):
+    document: DocumentOutput
+    source_available: bool
+    source_error: str | None = None
+    source_pages: list[DocumentSourcePageOutput]
+    chunks: list[DocumentChunkContentOutput]
+    source_pagination: dict
+    chunk_pagination: dict

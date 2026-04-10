@@ -61,6 +61,15 @@
 - `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
 - `text/markdown`
 
+### 可视化网页能力
+
+- `GET /` 或 `GET /ui`：知识库分类首页
+- `GET /ui/categories/{category_id}`：分类文档列表页
+- `GET /api/visualization/categories`
+- `GET /api/visualization/categories/{category_id}/documents`
+- `GET /api/visualization/import-tasks/{task_id}`
+- `GET /ws/import-tasks/{task_id}`
+
 ---
 
 ## 标准导入流程
@@ -216,6 +225,12 @@ PYTHONPYCACHEPREFIX=/tmp/knowledgebase-pyc python3 -m compileall knowledgebase t
 docker compose -f docker-compose.dev.yml --env-file .env.dev up --build -d
 ```
 
+网页入口：
+
+```bash
+http://127.0.0.1:${NGINX_PORT:-8080}/ui
+```
+
 查看状态：
 
 ```bash
@@ -232,6 +247,12 @@ docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 app
 
 ```bash
 docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 worker
+```
+
+查看 nginx 日志：
+
+```bash
+docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 nginx
 ```
 
 停止：

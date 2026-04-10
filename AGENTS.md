@@ -104,6 +104,15 @@
 
 * `kb_search_retrieve`
 
+#### 可视化网页能力
+
+* `GET /` 或 `GET /ui`
+* `GET /ui/categories/{category_id}`
+* `GET /api/visualization/categories`
+* `GET /api/visualization/categories/{category_id}/documents`
+* `GET /api/visualization/import-tasks/{task_id}`
+* `GET /ws/import-tasks/{task_id}`
+
 ### 3. 当前存储与检索实现状态
 
 * 业务主库使用 PostgreSQL
@@ -121,6 +130,7 @@
 
 * 文档检索粒度是 `chunk`，不是整篇文档
 * 远端标准导入路径是：先上传暂存文件，再通过 `*_from_staged` 接口导入
+* 网页模块只允许通过后端调用 MCP Tool 获取数据，不允许直接绕过 MCP 查询主库
 * PDF 更新采用整篇重建，不做局部增量更新
 * 删除、更新、导入都要求跨 PostgreSQL / Milvus / 文件存储的一致性补偿
 * Milvus 不是业务主库，检索结果必须回查 PostgreSQL 后再返回
@@ -130,7 +140,8 @@
 * 修复了参数校验失败时部分接口被 MCP 包成非标准错误的问题
 * 修复了 PDF 文本中含 `NUL (0x00)` 字节导致 PostgreSQL 插入失败的问题
 * 修复了英文问句和中英术语检索时排序质量偏差的问题
-* 当前全量测试结果为 `124/124` 通过
+* 当前全量测试结果为 `128/128` 通过
+* 已新增网页模块契约测试与 WebSocket 测试
 
 ### 6. 当前测试资产
 
@@ -183,6 +194,12 @@ docker compose -f docker-compose.dev.yml --env-file .env.dev ps
 
 ```bash
 docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 app
+```
+
+查看 nginx 日志：
+
+```bash
+docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 nginx
 ```
 
 停止开发环境：
@@ -239,6 +256,12 @@ git merge --no-ff test
 
 ```bash
 docker exec knowledgebase-app-dev sh -lc 'cd /app && /opt/venv/bin/python -m test.run_suite'
+```
+
+仅跑网页模块测试：
+
+```bash
+docker exec knowledgebase-app-dev sh -lc 'cd /app && /opt/venv/bin/python -m unittest -v test.test_web_visualization_contract'
 ```
 
 运行后检查报告：
