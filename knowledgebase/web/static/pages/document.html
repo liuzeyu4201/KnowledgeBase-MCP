@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>文档原文详情</title>
+    <link rel="stylesheet" href="/assets/css/app.css" />
+  </head>
+  <body data-page="document">
+    <div class="shell">
+      <header class="hero hero-compact">
+        <div class="hero-grid">
+          <div class="hero-main hero-main-category">
+            <a id="document-back-link" class="back-link" href="/ui">返回分类总览</a>
+            <p class="eyebrow">Document Content</p>
+            <h1 id="document-title">文档原文详情</h1>
+            <p id="document-subtitle" class="hero-copy">正在读取文档信息...</p>
+          </div>
+          <div class="hero-aside">
+            <div class="hero-stat">
+              <span class="hero-stat-label">正文分页</span>
+              <strong id="hero-source-count">-</strong>
+              <span class="hero-stat-note">当前原件解析正文总段数 / 总页数</span>
+            </div>
+            <div class="hero-stat">
+              <span class="hero-stat-label">原件状态</span>
+              <strong id="hero-source-status">-</strong>
+              <span id="hero-source-note" class="hero-stat-note">正在检测原件可读性</span>
+            </div>
+            <div class="hero-action-stack">
+              <a id="document-chunks-link" class="card-link" href="#">查看 Chunk 原文页</a>
+              <button id="delete-document-button" class="danger-button" type="button">删除当前文档</button>
+              <span class="hero-stat-note">文档删除会级联清理源文件、chunk 和向量</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>文档元数据</h2>
+            <p id="document-meta">正在读取文档元数据...</p>
+          </div>
+        </div>
+        <div id="document-error" class="notice notice-error hidden"></div>
+        <dl id="document-meta-grid" class="meta-grid"></dl>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>原件解析正文</h2>
+            <p>展示从知识库原件重新解析得到的内容，适合查看接近原文的视图。</p>
+          </div>
+          <div id="source-pagination-summary" class="pagination-summary"></div>
+        </div>
+        <div id="document-source-warning" class="notice hidden"></div>
+        <div id="document-source-pages" class="content-section"></div>
+        <div class="pagination-bar">
+          <button id="source-prev-page" class="ghost-button" type="button">上一页</button>
+          <div id="source-page-indicator" class="page-indicator">第 1 页</div>
+          <button id="source-next-page" class="ghost-button" type="button">下一页</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="/assets/js/app.js" defer></script>
+  </body>
+</html>

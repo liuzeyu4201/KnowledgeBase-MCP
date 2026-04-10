@@ -205,3 +205,35 @@ class DocumentContractTestCase(MCPIntegrationTestCase):
                 await self.delete_category_best_effort(category)
 
         self.run_async(scenario())
+
+    def test_document_content_get_returns_source_pages_and_chunks(self) -> None:
+        async def scenario() -> None:
+            category = await self.create_category(prefix="document_content")
+            document = await self.import_document(
+                category_id=category["id"],
+                title_prefix="document_content",
+                file_name="content.md",
+                mime_type="text/markdown",
+                file_content_base64=self.read_markdown_base64(title="Content View"),
+            )
+            try:
+                payload = await self.tool(
+                    "kb_document_content_get",
+                    id=document["id"],
+                    source_page=1,
+                    source_page_size=1,
+                    chunk_page=1,
+                    chunk_page_size=1,
+                )
+                self.assert_success(payload)
+                self.assertEqual(payload["data"]["document"]["id"], document["id"])
+                self.assertTrue(payload["data"]["source_available"])
+                self.assertGreaterEqual(len(payload["data"]["source_pages"]), 1)
+                self.assertEqual(len(payload["data"]["chunks"]), 1)
+                self.assertEqual(payload["data"]["chunk_pagination"]["page_size"], 1)
+                self.assertIn("Content View", payload["data"]["source_pages"][0]["content"])
+            finally:
+                await self.delete_document_best_effort(document)
+                await self.delete_category_best_effort(category)
+
+        self.run_async(scenario())

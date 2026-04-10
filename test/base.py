@@ -127,6 +127,23 @@ class MCPIntegrationTestCase(unittest.TestCase):
         )
         return response.json()
 
+    def http_text(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> tuple[int, str]:
+        """调用普通 HTTP 接口并返回状态码和文本内容。"""
+
+        response = httpx.request(
+            method,
+            f"{self.api_base_url}{path}",
+            params=params,
+            timeout=120.0,
+        )
+        return response.status_code, response.text
+
     def assert_success(self, payload: dict[str, Any], *, code: str = "OK") -> None:
         """断言接口成功返回。"""
 

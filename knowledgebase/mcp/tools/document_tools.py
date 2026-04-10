@@ -85,6 +85,39 @@ def register_document_tools(mcp: Any) -> None:
         return _execute_read(payload=payload, action="list")
 
     @mcp.tool(
+        name="kb_document_content_get",
+        description="读取单个文档的原文视图和 chunk 原文，适合网页或 Agent 查看文档内容细节。",
+    )
+    def kb_document_content_get(
+        id: int | None = None,
+        document_uid: str | None = None,
+        source_page: int = 1,
+        source_page_size: int = 1,
+        chunk_page: int = 1,
+        chunk_page_size: int = 5,
+        request_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """读取文档原文和 chunk 内容。
+
+        Agent 使用建议：
+        - `source_pages` 更接近原件解析后的内容
+        - `chunks` 是系统真实入库并参与检索的文本片段
+        """
+
+        payload = {
+            "id": id,
+            "document_uid": document_uid,
+            "source_page": source_page,
+            "source_page_size": source_page_size,
+            "chunk_page": chunk_page,
+            "chunk_page_size": chunk_page_size,
+            "request_id": request_id,
+            "trace_id": trace_id,
+        }
+        return _execute_read(payload=payload, action="content_get")
+
+    @mcp.tool(
         name="kb_document_import_from_staged",
         description="标准远端路径：引用 staged_file 导入文档并写入向量索引。",
     )
@@ -203,6 +236,13 @@ def _execute_read(*, payload: dict[str, Any], action: str) -> dict[str, Any]:
                     "items": [item.model_dump(mode="json") for item in items],
                     "pagination": pagination,
                 },
+                request_id=payload.get("request_id"),
+                trace_id=payload.get("trace_id"),
+            )
+        if action == "content_get":
+            content = service.get_document_content(payload)
+            return build_success_response(
+                data=content.model_dump(mode="json"),
                 request_id=payload.get("request_id"),
                 trace_id=payload.get("trace_id"),
             )

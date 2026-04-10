@@ -18,6 +18,9 @@ from knowledgebase.repositories.chunk_repository import ChunkRepository
 from knowledgebase.repositories.document_repository import DocumentRepository
 from knowledgebase.repositories.staged_file_repository import StagedFileRepository
 from knowledgebase.schemas.document import (
+    DocumentChunkContentOutput,
+    DocumentContentGetInput,
+    DocumentContentOutput,
     DocumentDeleteInput,
     DocumentGetInput,
     DocumentImportInput,
@@ -145,6 +148,61 @@ class DocumentService:
 
         document = self._resolve_document(id=data.id, document_uid=data.document_uid)
         return DocumentOutput.from_model(document)
+
+    def get_document_content(self, payload: dict) -> DocumentContentOutput:
+        """读取文档原文视图和已入库 chunk 内容。"""
+
+        try:
+            data = DocumentContentGetInput.model_validate(payload)
+        except ValidationError as exc:
+            raise AppError(
+                code="INVALID_ARGUMENT",
+                message="文档内容查询参数不合法",
+                error_type="validation_error",
+                details={"errors": exc.errors()},
+            ) from exc
+
+        document = self._resolve_document(id=data.id, document_uid=data.document_uid)
+        chunks = self.chunk_repository.list_by_document_id(document.id)
+
+        source_pages: list[dict[str, int | str]] = []
+        source_available = True
+        source_error: str | None = None
+
+        try:
+            file_bytes = self.storage.read_file_bytes(document.storage_uri)
+            source_pages = self.parser.parse(mime_type=document.mime_type, content=file_bytes)
+        except Exception as exc:  # noqa: BLE001
+            # 原件不可读时仍然返回 chunk 原文，避免页面完全不可用。
+            source_available = False
+            source_error = str(exc)
+
+        source_total = len(source_pages)
+        chunk_total = len(chunks)
+        source_start = (data.source_page - 1) * data.source_page_size
+        source_end = source_start + data.source_page_size
+        chunk_start = (data.chunk_page - 1) * data.chunk_page_size
+        chunk_end = chunk_start + data.chunk_page_size
+
+        return DocumentContentOutput(
+            document=DocumentOutput.from_model(document),
+            source_available=source_available,
+            source_error=source_error,
+            source_pages=source_pages[source_start:source_end],
+            chunks=[DocumentChunkContentOutput.from_model(chunk) for chunk in chunks[chunk_start:chunk_end]],
+            source_pagination={
+                "page": data.source_page,
+                "page_size": data.source_page_size,
+                "total": source_total,
+                "has_next": source_end < source_total,
+            },
+            chunk_pagination={
+                "page": data.chunk_page,
+                "page_size": data.chunk_page_size,
+                "total": chunk_total,
+                "has_next": chunk_end < chunk_total,
+            },
+        )
 
     def list_documents(self, payload: dict) -> tuple[list[DocumentOutput], dict]:
         """按过滤条件分页查询文档列表。"""

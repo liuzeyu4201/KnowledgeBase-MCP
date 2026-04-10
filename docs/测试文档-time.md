@@ -1,10 +1,10 @@
 # 测试文档
 
-- 生成时间: 2026-04-09T11:17:22.814124
+- 生成时间: 2026-04-10T05:40:49.278528
 - Python: 3.13.13
 - 平台: Linux-6.12.76-linuxkit-aarch64-with-glibc2.41
-- 执行用例总数: 124
-- 通过: 124
+- 执行用例总数: 128
+- 通过: 128
 - 失败: 0
 - 错误: 0
 - 跳过: 0
@@ -232,9 +232,13 @@ test_document_update_from_staged_rebuilds_document (test_staged_file_contract.St
 test_staged_file_delete_rejects_consumed_file (test_staged_file_contract.StagedFileContractTestCase.test_staged_file_delete_rejects_consumed_file) ... ok
 test_staged_file_http_upload_and_mcp_manage_smoke (test_staged_file_contract.StagedFileContractTestCase.test_staged_file_http_upload_and_mcp_manage_smoke) ... ok
 test_staged_file_upload_rejects_invalid_mime (test_staged_file_contract.StagedFileContractTestCase.test_staged_file_upload_rejects_invalid_mime) ... ok
+test_category_documents_page_and_api (test_web_visualization_contract.WebVisualizationContractTestCase.test_category_documents_page_and_api) ... ok
+test_home_page_and_categories_api (test_web_visualization_contract.WebVisualizationContractTestCase.test_home_page_and_categories_api) ... ok
+test_import_task_visualization_api (test_web_visualization_contract.WebVisualizationContractTestCase.test_import_task_visualization_api) ... ok
+test_task_websocket_pushes_terminal_state (test_web_visualization_contract.WebVisualizationWebSocketTestCase.test_task_websocket_pushes_terminal_state) ... ok
 
 ----------------------------------------------------------------------
-Ran 124 tests in 454.812s
+Ran 128 tests in 512.184s
 
 OK
 ```
