@@ -1,10 +1,10 @@
 # 测试文档
 
-- 生成时间: 2026-04-09T11:17:22.814124
+- 生成时间: 2026-04-11T06:23:15.242459
 - Python: 3.13.13
 - 平台: Linux-6.12.76-linuxkit-aarch64-with-glibc2.41
-- 执行用例总数: 124
-- 通过: 124
+- 执行用例总数: 136
+- 通过: 136
 - 失败: 0
 - 错误: 0
 - 跳过: 0
@@ -21,6 +21,7 @@ test_concurrent_duplicate_category_create_should_only_return_business_conflict (
 test_high_concurrency_search_requests_all_succeed (test_concurrency_pressure.ConcurrencyAndPressureTestCase.test_high_concurrency_search_requests_all_succeed) ... ok
 test_sequential_search_pressure_burst (test_concurrency_pressure.ConcurrencyAndPressureTestCase.test_sequential_search_pressure_burst) ... ok
 test_category_delete_rejects_active_documents (test_document_contract.DocumentContractTestCase.test_category_delete_rejects_active_documents) ... ok
+test_document_content_get_returns_source_pages_and_chunks (test_document_contract.DocumentContractTestCase.test_document_content_get_returns_source_pages_and_chunks) ... ok
 test_document_import_docx_smoke (test_document_contract.DocumentContractTestCase.test_document_import_docx_smoke) ... ok
 test_document_import_from_staged_rejects_missing_staged_file (test_document_contract.DocumentContractTestCase.test_document_import_from_staged_rejects_missing_staged_file) ... ok
 test_document_import_get_list_delete_smoke (test_document_contract.DocumentContractTestCase.test_document_import_get_list_delete_smoke) ... ok
@@ -232,9 +233,20 @@ test_document_update_from_staged_rebuilds_document (test_staged_file_contract.St
 test_staged_file_delete_rejects_consumed_file (test_staged_file_contract.StagedFileContractTestCase.test_staged_file_delete_rejects_consumed_file) ... ok
 test_staged_file_http_upload_and_mcp_manage_smoke (test_staged_file_contract.StagedFileContractTestCase.test_staged_file_http_upload_and_mcp_manage_smoke) ... ok
 test_staged_file_upload_rejects_invalid_mime (test_staged_file_contract.StagedFileContractTestCase.test_staged_file_upload_rejects_invalid_mime) ... ok
+test_categories_api_supports_keyword_filter (test_web_visualization_contract.WebVisualizationContractTestCase.test_categories_api_supports_keyword_filter) ... ok
+test_categories_api_supports_keyword_for_name_and_code (test_web_visualization_contract.WebVisualizationContractTestCase.test_categories_api_supports_keyword_for_name_and_code) ... ok
+test_category_documents_api_supports_title_filter (test_web_visualization_contract.WebVisualizationContractTestCase.test_category_documents_api_supports_title_filter) ... ok
+test_category_documents_page_and_api (test_web_visualization_contract.WebVisualizationContractTestCase.test_category_documents_page_and_api) ... ok
+test_document_chunk_page_and_api (test_web_visualization_contract.WebVisualizationContractTestCase.test_document_chunk_page_and_api) ... ok
+test_document_content_page_and_api (test_web_visualization_contract.WebVisualizationContractTestCase.test_document_content_page_and_api) ... ok
+test_home_page_and_categories_api (test_web_visualization_contract.WebVisualizationContractTestCase.test_home_page_and_categories_api) ... ok
+test_import_task_visualization_api (test_web_visualization_contract.WebVisualizationContractTestCase.test_import_task_visualization_api) ... ok
+test_visual_category_delete_api_requires_empty_documents (test_web_visualization_contract.WebVisualizationContractTestCase.test_visual_category_delete_api_requires_empty_documents) ... ok
+test_visual_document_delete_api (test_web_visualization_contract.WebVisualizationContractTestCase.test_visual_document_delete_api) ... ok
+test_task_websocket_pushes_terminal_state (test_web_visualization_contract.WebVisualizationWebSocketTestCase.test_task_websocket_pushes_terminal_state) ... ok
 
 ----------------------------------------------------------------------
-Ran 124 tests in 454.812s
+Ran 136 tests in 596.671s
 
 OK
 ```

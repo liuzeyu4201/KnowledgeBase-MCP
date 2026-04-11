@@ -15,12 +15,14 @@ from knowledgebase.domain.document_types import (
 from knowledgebase.domain.exceptions import AppError
 from knowledgebase.integrations.storage.file_storage import FileStorage
 from knowledgebase.repositories.staged_file_repository import StagedFileRepository
+from knowledgebase.repositories.storage_gc_task_repository import StorageGCTaskRepository
 from knowledgebase.schemas.staged_file import (
     StagedFileDeleteInput,
     StagedFileGetInput,
     StagedFileListInput,
     StagedFileOutput,
 )
+from knowledgebase.services.storage_cleanup_service import StorageCleanupService
 
 
 class StagedFileService:
@@ -30,6 +32,9 @@ class StagedFileService:
         self.repository = repository
         self.storage = FileStorage()
         self.settings = get_settings()
+        self.cleanup_service = StorageCleanupService(
+            StorageGCTaskRepository(repository.session)
+        )
 
     def create_from_stream(
         self,
@@ -67,7 +72,7 @@ class StagedFileService:
 
         try:
             model = self.repository.create(
-                storage_backend="local",
+                storage_backend=self.storage.resolve_storage_backend(storage_uri),
                 storage_uri=storage_uri,
                 file_name=file_name,
                 mime_type=resolved_mime_type,
@@ -107,7 +112,7 @@ class StagedFileService:
         )
         try:
             model = self.repository.create(
-                storage_backend="local",
+                storage_backend=self.storage.resolve_storage_backend(storage_uri),
                 storage_uri=storage_uri,
                 file_name=file_name,
                 mime_type=resolved_mime_type,
@@ -188,7 +193,12 @@ class StagedFileService:
                 details={"status": model.status},
             )
 
-        self.storage.delete_file(model.storage_uri)
+        self.cleanup_service.delete_now_or_enqueue(
+            resource_type="staged_file",
+            resource_id=model.id,
+            storage_uri=model.storage_uri,
+            storage_backend=model.storage_backend,
+        )
         model = self.repository.mark_deleted(model)
         return StagedFileOutput.from_model(model)
 
@@ -200,7 +210,12 @@ class StagedFileService:
             return
         if model.status not in self.repository.DELETABLE_STATUSES:
             return
-        self.storage.delete_file(model.storage_uri)
+        self.cleanup_service.delete_now_or_enqueue(
+            resource_type="staged_file",
+            resource_id=model.id,
+            storage_uri=model.storage_uri,
+            storage_backend=model.storage_backend,
+        )
         self.repository.mark_deleted(model)
 
     def _resolve_staged_file(

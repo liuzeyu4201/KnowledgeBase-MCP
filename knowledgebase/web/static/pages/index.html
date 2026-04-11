@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>知识库分类总览</title>
+    <link rel="stylesheet" href="/assets/css/app.css" />
+  </head>
+  <body data-page="home">
+    <div class="shell">
+      <header class="hero">
+        <div class="hero-grid">
+          <div>
+            <p class="eyebrow">KnowledgeBase Visual Console</p>
+            <h1>分类总览与容量视图</h1>
+            <p class="hero-copy">
+              这是知识库管理台首页。页面数据由后端统一调用 MCP Tool 聚合，适合在分类数量持续增长时进行筛选、分页和容量巡检。
+            </p>
+          </div>
+          <div class="hero-aside">
+            <div class="hero-stat">
+              <span class="hero-stat-label">当前视图</span>
+              <strong id="hero-category-count">-</strong>
+              <span class="hero-stat-note">按 MCP 聚合后的分类数量</span>
+            </div>
+            <div class="hero-stat">
+              <span class="hero-stat-label">默认分页</span>
+              <strong>12</strong>
+              <span class="hero-stat-note">避免大量分类一次性挤满页面</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="panel">
+        <div class="toolbar">
+          <div class="toolbar-group toolbar-group-wide">
+            <label class="field">
+              <span>分类名称 / 编码</span>
+              <input id="home-keyword" type="text" placeholder="输入分类名称或 category_code" />
+            </label>
+          </div>
+          <div class="toolbar-group">
+            <label class="field">
+              <span>状态</span>
+              <select id="home-status">
+                <option value="">全部</option>
+                <option value="1">启用</option>
+                <option value="0">停用</option>
+              </select>
+            </label>
+          </div>
+          <div class="toolbar-group">
+            <label class="field">
+              <span>每页数量</span>
+              <select id="home-page-size">
+                <option value="12">12</option>
+                <option value="24">24</option>
+                <option value="48">48</option>
+              </select>
+            </label>
+          </div>
+          <div class="toolbar-actions">
+            <button id="apply-home-filters" class="action-button" type="button">应用筛选</button>
+            <button id="refresh-home" class="ghost-button" type="button">刷新</button>
+          </div>
+        </div>
+
+        <div class="panel-head panel-head-inline">
+          <div>
+            <h2>分类列表</h2>
+            <p id="home-meta">正在读取分类数据...</p>
+          </div>
+          <div id="home-pagination-summary" class="pagination-summary"></div>
+        </div>
+
+        <div id="home-error" class="notice notice-error hidden"></div>
+        <div id="category-grid" class="category-grid"></div>
+
+        <div class="pagination-bar">
+          <button id="home-prev-page" class="ghost-button" type="button">上一页</button>
+          <div id="home-page-indicator" class="page-indicator">第 1 页</div>
+          <button id="home-next-page" class="ghost-button" type="button">下一页</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="/assets/js/app.js" defer></script>
+  </body>
+</html>

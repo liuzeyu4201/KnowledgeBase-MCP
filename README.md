@@ -61,6 +61,15 @@
 - `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
 - `text/markdown`
 
+### 可视化网页能力
+
+- `GET /` 或 `GET /ui`：知识库分类首页
+- `GET /ui/categories/{category_id}`：分类文档列表页
+- `GET /api/visualization/categories`
+- `GET /api/visualization/categories/{category_id}/documents`
+- `GET /api/visualization/import-tasks/{task_id}`
+- `GET /ws/import-tasks/{task_id}`
+
 ---
 
 ## 标准导入流程
@@ -137,7 +146,15 @@
 
 ### 文件存储
 
-当前开发环境默认走本地存储目录，远端标准协议通过 HTTP 上传接口创建暂存文件。
+- 业务文件存储：MinIO
+- 暂存文件与正式文档原件都保存为 `s3://bucket/key` 形式的对象 URI
+- PostgreSQL 保存文件元数据和对象引用
+- 删除失败时会落 `kb_storage_gc_task` 进入后台补偿清理
+
+当前开发环境默认 bucket：
+
+- 暂存文件：`kb-staged-files`
+- 正式文档：`kb-documents`
 
 ### 检索策略
 
@@ -216,6 +233,12 @@ PYTHONPYCACHEPREFIX=/tmp/knowledgebase-pyc python3 -m compileall knowledgebase t
 docker compose -f docker-compose.dev.yml --env-file .env.dev up --build -d
 ```
 
+网页入口：
+
+```bash
+http://127.0.0.1:${NGINX_PORT:-8080}/ui
+```
+
 查看状态：
 
 ```bash
@@ -232,6 +255,12 @@ docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 app
 
 ```bash
 docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 worker
+```
+
+查看 nginx 日志：
+
+```bash
+docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 nginx
 ```
 
 停止：

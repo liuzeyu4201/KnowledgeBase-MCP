@@ -3,6 +3,7 @@ from __future__ import annotations
 import uvicorn
 from fastapi import FastAPI
 from mcp.server.fastmcp import FastMCP
+from starlette.staticfiles import StaticFiles
 from starlette.applications import Starlette
 
 from knowledgebase.app.config import get_settings
@@ -13,6 +14,8 @@ from knowledgebase.mcp.tools.document_tools import register_document_tools
 from knowledgebase.mcp.tools.import_task_tools import register_import_task_tools
 from knowledgebase.mcp.tools.search_tools import register_search_tools
 from knowledgebase.mcp.tools.staged_file_tools import register_staged_file_tools
+from knowledgebase.web.middleware import RequestContextMiddleware
+from knowledgebase.web.routes import STATIC_DIR, api_router, page_router, ws_router
 
 settings = get_settings()
 mcp = FastMCP(
@@ -34,7 +37,19 @@ def create_http_app() -> Starlette:
 
     mcp_app = mcp.streamable_http_app()
     upload_app = FastAPI(title=f"{settings.app_name} Upload API")
+    upload_app.add_middleware(RequestContextMiddleware)
+
+    @upload_app.get("/healthz")
+    def healthz() -> dict[str, str]:
+        """提供容器级健康检查端点，仅在应用启动完成后返回成功。"""
+
+        return {"status": "ok"}
+
     upload_app.include_router(staged_file_router)
+    upload_app.include_router(page_router)
+    upload_app.include_router(api_router)
+    upload_app.include_router(ws_router)
+    upload_app.mount("/assets", StaticFiles(directory=str(STATIC_DIR)), name="visual-assets")
     mcp_app.mount("/", upload_app)
     return mcp_app
 

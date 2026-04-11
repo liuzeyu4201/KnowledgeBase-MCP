@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from pydantic import ValidationError
 
+from knowledgebase.db.session import session_scope
 from knowledgebase.domain.document_types import resolve_document_source_type
 from knowledgebase.domain.exceptions import AppError
 from knowledgebase.integrations.chunking.text_chunker import TextChunker
@@ -17,7 +18,11 @@ from knowledgebase.repositories.category_repository import CategoryRepository
 from knowledgebase.repositories.chunk_repository import ChunkRepository
 from knowledgebase.repositories.document_repository import DocumentRepository
 from knowledgebase.repositories.staged_file_repository import StagedFileRepository
+from knowledgebase.repositories.storage_gc_task_repository import StorageGCTaskRepository
 from knowledgebase.schemas.document import (
+    DocumentChunkContentOutput,
+    DocumentContentGetInput,
+    DocumentContentOutput,
     DocumentDeleteInput,
     DocumentGetInput,
     DocumentImportInput,
@@ -26,6 +31,7 @@ from knowledgebase.schemas.document import (
     DocumentOutput,
     DocumentUpdateFromStagedInput,
 )
+from knowledgebase.services.storage_cleanup_service import StorageCleanupService
 
 
 @dataclass
@@ -41,8 +47,8 @@ class ImportCompensationContext:
 class DeleteCompensationContext:
     """记录文档删除期间需要恢复的外部状态。"""
 
-    original_storage_uri: str | None = None
-    staged_storage_uri: str | None = None
+    document_id: int | None = None
+    storage_uri_to_delete: str | None = None
     milvus_backup_rows: list[dict] = field(default_factory=list)
     milvus_deleted: bool = False
 
@@ -51,13 +57,23 @@ class DeleteCompensationContext:
 class UpdateCompensationContext:
     """记录文档更新期间需要恢复和清理的外部状态。"""
 
+    document_id: int | None = None
     old_storage_uri: str | None = None
-    staged_old_storage_uri: str | None = None
     new_storage_uri: str | None = None
     old_milvus_rows: list[dict] = field(default_factory=list)
     old_milvus_deleted: bool = False
     new_milvus_chunk_ids: list[int] = field(default_factory=list)
     new_milvus_inserted: bool = False
+
+
+@dataclass
+class PostCommitCleanupTarget:
+    """记录提交后需要清理的对象。"""
+
+    resource_type: str
+    resource_id: int | None
+    storage_uri: str
+    storage_backend: str | None = None
 
 
 class DocumentService:
@@ -83,7 +99,7 @@ class DocumentService:
         self._compensation_context: ImportCompensationContext | None = None
         self._delete_compensation_context: DeleteCompensationContext | None = None
         self._update_compensation_context: UpdateCompensationContext | None = None
-        self._post_commit_cleanup_paths: list[str] = []
+        self._post_commit_cleanup_targets: list[PostCommitCleanupTarget] = []
 
     def import_document_from_staged(
         self,
@@ -124,10 +140,16 @@ class DocumentService:
         self.staged_file_repository.mark_consumed(
             staged_file,
             linked_document_id=result["document"]["id"],
-            final_storage_uri=result["document"]["storage_uri"],
         )
         if staged_storage_uri != result["document"]["storage_uri"]:
-            self._post_commit_cleanup_paths.append(staged_storage_uri)
+            self._post_commit_cleanup_targets.append(
+                PostCommitCleanupTarget(
+                    resource_type="staged_file",
+                    resource_id=staged_file.id,
+                    storage_uri=staged_storage_uri,
+                    storage_backend=staged_file.storage_backend,
+                )
+            )
         return result
 
     def get_document(self, payload: dict) -> DocumentOutput:
@@ -145,6 +167,61 @@ class DocumentService:
 
         document = self._resolve_document(id=data.id, document_uid=data.document_uid)
         return DocumentOutput.from_model(document)
+
+    def get_document_content(self, payload: dict) -> DocumentContentOutput:
+        """读取文档原文视图和已入库 chunk 内容。"""
+
+        try:
+            data = DocumentContentGetInput.model_validate(payload)
+        except ValidationError as exc:
+            raise AppError(
+                code="INVALID_ARGUMENT",
+                message="文档内容查询参数不合法",
+                error_type="validation_error",
+                details={"errors": exc.errors()},
+            ) from exc
+
+        document = self._resolve_document(id=data.id, document_uid=data.document_uid)
+        chunks = self.chunk_repository.list_by_document_id(document.id)
+
+        source_pages: list[dict[str, int | str]] = []
+        source_available = True
+        source_error: str | None = None
+
+        try:
+            file_bytes = self.storage.read_file_bytes(document.storage_uri)
+            source_pages = self.parser.parse(mime_type=document.mime_type, content=file_bytes)
+        except Exception as exc:  # noqa: BLE001
+            # 原件不可读时仍然返回 chunk 原文，避免页面完全不可用。
+            source_available = False
+            source_error = str(exc)
+
+        source_total = len(source_pages)
+        chunk_total = len(chunks)
+        source_start = (data.source_page - 1) * data.source_page_size
+        source_end = source_start + data.source_page_size
+        chunk_start = (data.chunk_page - 1) * data.chunk_page_size
+        chunk_end = chunk_start + data.chunk_page_size
+
+        return DocumentContentOutput(
+            document=DocumentOutput.from_model(document),
+            source_available=source_available,
+            source_error=source_error,
+            source_pages=source_pages[source_start:source_end],
+            chunks=[DocumentChunkContentOutput.from_model(chunk) for chunk in chunks[chunk_start:chunk_end]],
+            source_pagination={
+                "page": data.source_page,
+                "page_size": data.source_page_size,
+                "total": source_total,
+                "has_next": source_end < source_total,
+            },
+            chunk_pagination={
+                "page": data.chunk_page,
+                "page_size": data.chunk_page_size,
+                "total": chunk_total,
+                "has_next": chunk_end < chunk_total,
+            },
+        )
 
     def list_documents(self, payload: dict) -> tuple[list[DocumentOutput], dict]:
         """按过滤条件分页查询文档列表。"""
@@ -195,11 +272,9 @@ class DocumentService:
         chunk_ids = [chunk.id for chunk in chunks]
 
         self._delete_compensation_context = DeleteCompensationContext()
+        self._delete_compensation_context.document_id = document.id
+        self._delete_compensation_context.storage_uri_to_delete = document.storage_uri
         self._delete_compensation_context.milvus_backup_rows = self.milvus.fetch_chunks(chunk_ids)
-
-        original_storage_uri, staged_storage_uri = self.storage.stage_delete_file(document.storage_uri)
-        self._delete_compensation_context.original_storage_uri = original_storage_uri
-        self._delete_compensation_context.staged_storage_uri = staged_storage_uri
 
         try:
             if chunk_ids:
@@ -277,10 +352,16 @@ class DocumentService:
         self.staged_file_repository.mark_consumed(
             staged_file,
             linked_document_id=result["document"]["id"],
-            final_storage_uri=result["document"]["storage_uri"],
         )
         if staged_storage_uri != result["document"]["storage_uri"]:
-            self._post_commit_cleanup_paths.append(staged_storage_uri)
+            self._post_commit_cleanup_targets.append(
+                PostCommitCleanupTarget(
+                    resource_type="staged_file",
+                    resource_id=staged_file.id,
+                    storage_uri=staged_storage_uri,
+                    storage_backend=staged_file.storage_backend,
+                )
+            )
         return result
 
     def rollback_import_side_effects(
@@ -349,15 +430,6 @@ class DocumentService:
             except Exception as exc:  # noqa: BLE001
                 rollback_errors.append(f"milvus rollback failed: {exc}")
 
-        if self._delete_compensation_context:
-            try:
-                self.storage.restore_staged_file(
-                    original_path=self._delete_compensation_context.original_storage_uri,
-                    staged_path=self._delete_compensation_context.staged_storage_uri,
-                )
-            except Exception as exc:  # noqa: BLE001
-                rollback_errors.append(f"storage rollback failed: {exc}")
-
         self._delete_compensation_context = None
 
         if rollback_errors:
@@ -377,8 +449,10 @@ class DocumentService:
         """数据库提交成功后最终清理暂存文件并清空删除补偿上下文。"""
 
         if self._delete_compensation_context:
-            self.storage.finalize_staged_file_delete(
-                self._delete_compensation_context.staged_storage_uri
+            self._delete_or_enqueue_after_commit(
+                resource_type="document",
+                resource_id=self._delete_compensation_context.document_id,
+                storage_uri=self._delete_compensation_context.storage_uri_to_delete,
             )
         self._delete_compensation_context = None
 
@@ -414,15 +488,6 @@ class DocumentService:
             except Exception as exc:  # noqa: BLE001
                 rollback_errors.append(f"new storage cleanup failed: {exc}")
 
-        if self._update_compensation_context:
-            try:
-                self.storage.restore_staged_file(
-                    original_path=self._update_compensation_context.old_storage_uri,
-                    staged_path=self._update_compensation_context.staged_old_storage_uri,
-                )
-            except Exception as exc:  # noqa: BLE001
-                rollback_errors.append(f"old storage restore failed: {exc}")
-
         self._update_compensation_context = None
 
         if rollback_errors:
@@ -442,17 +507,24 @@ class DocumentService:
         """数据库提交成功后最终清理被替换掉的旧文件。"""
 
         if self._update_compensation_context:
-            self.storage.finalize_staged_file_delete(
-                self._update_compensation_context.staged_old_storage_uri
+            self._delete_or_enqueue_after_commit(
+                resource_type="document",
+                resource_id=self._update_compensation_context.document_id,
+                storage_uri=self._update_compensation_context.old_storage_uri,
             )
         self._update_compensation_context = None
 
     def finalize_post_commit_cleanup(self) -> None:
         """提交成功后清理被 from_staged 链路替换掉的暂存物理文件。"""
 
-        for file_path in self._post_commit_cleanup_paths:
-            self.storage.delete_file(file_path)
-        self._post_commit_cleanup_paths = []
+        for target in self._post_commit_cleanup_targets:
+            self._delete_or_enqueue_after_commit(
+                resource_type=target.resource_type,
+                resource_id=target.resource_id,
+                storage_uri=target.storage_uri,
+                storage_backend=target.storage_backend,
+            )
+        self._post_commit_cleanup_targets = []
 
     def _resolve_document(
         self,
@@ -695,11 +767,9 @@ class DocumentService:
         old_chunk_ids = [chunk.id for chunk in old_chunks]
 
         self._update_compensation_context = UpdateCompensationContext()
+        self._update_compensation_context.document_id = document.id
+        self._update_compensation_context.old_storage_uri = document.storage_uri
         self._update_compensation_context.old_milvus_rows = self.milvus.fetch_chunks(old_chunk_ids)
-
-        old_storage_uri, staged_old_storage_uri = self.storage.stage_delete_file(document.storage_uri)
-        self._update_compensation_context.old_storage_uri = old_storage_uri
-        self._update_compensation_context.staged_old_storage_uri = staged_old_storage_uri
 
         new_storage_uri, saved_file_bytes = self.storage.save_file_bytes(
             file_name=file_name,
@@ -819,3 +889,25 @@ class DocumentService:
                 "sparse_strategy": "milvus_bm25",
             },
         }
+
+    def _delete_or_enqueue_after_commit(
+        self,
+        *,
+        resource_type: str,
+        resource_id: int | None,
+        storage_uri: str | None,
+        storage_backend: str | None = None,
+    ) -> None:
+        """在主事务提交后删除对象；若删除失败则落库为清理任务。"""
+
+        if not storage_uri:
+            return
+
+        with session_scope() as session:
+            cleanup_service = StorageCleanupService(StorageGCTaskRepository(session))
+            cleanup_service.delete_now_or_enqueue(
+                resource_type=resource_type,
+                resource_id=resource_id,
+                storage_uri=storage_uri,
+                storage_backend=storage_backend,
+            )

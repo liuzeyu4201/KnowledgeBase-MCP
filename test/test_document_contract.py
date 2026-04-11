@@ -13,6 +13,7 @@ class DocumentContractTestCase(MCPIntegrationTestCase):
                 category_id=category["id"],
                 title_prefix="document_smoke",
             )
+            self.assert_storage_uri_exists(document["storage_uri"])
             try:
                 get_payload = await self.tool("kb_document_get", id=document["id"])
                 self.assert_success(get_payload)
@@ -33,6 +34,7 @@ class DocumentContractTestCase(MCPIntegrationTestCase):
                 delete_payload = await self.tool("kb_document_delete", id=document["id"])
                 self.assert_success(delete_payload)
                 self.assertTrue(delete_payload["data"]["deleted"])
+                self.wait_for_storage_uri_deleted(document["storage_uri"])
 
                 not_found_payload = await self.tool("kb_document_get", id=document["id"])
                 self.assert_error(not_found_payload, code="DOCUMENT_NOT_FOUND", error_type="not_found")
@@ -188,6 +190,7 @@ class DocumentContractTestCase(MCPIntegrationTestCase):
                 mime_type="text/markdown",
                 file_content_base64=self.read_markdown_base64(title="Before Replace"),
             )
+            old_storage_uri = document["storage_uri"]
             try:
                 payload = await self.update_document(
                     document_id=document["id"],
@@ -200,6 +203,40 @@ class DocumentContractTestCase(MCPIntegrationTestCase):
                 self.assertEqual(updated["mime_type"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
                 self.assertEqual(updated["source_type"], "docx")
                 self.assertEqual(updated["version"], 2)
+                self.assert_storage_uri_exists(updated["storage_uri"])
+                self.wait_for_storage_uri_deleted(old_storage_uri)
+            finally:
+                await self.delete_document_best_effort(document)
+                await self.delete_category_best_effort(category)
+
+        self.run_async(scenario())
+
+    def test_document_content_get_returns_source_pages_and_chunks(self) -> None:
+        async def scenario() -> None:
+            category = await self.create_category(prefix="document_content")
+            document = await self.import_document(
+                category_id=category["id"],
+                title_prefix="document_content",
+                file_name="content.md",
+                mime_type="text/markdown",
+                file_content_base64=self.read_markdown_base64(title="Content View"),
+            )
+            try:
+                payload = await self.tool(
+                    "kb_document_content_get",
+                    id=document["id"],
+                    source_page=1,
+                    source_page_size=1,
+                    chunk_page=1,
+                    chunk_page_size=1,
+                )
+                self.assert_success(payload)
+                self.assertEqual(payload["data"]["document"]["id"], document["id"])
+                self.assertTrue(payload["data"]["source_available"])
+                self.assertGreaterEqual(len(payload["data"]["source_pages"]), 1)
+                self.assertEqual(len(payload["data"]["chunks"]), 1)
+                self.assertEqual(payload["data"]["chunk_pagination"]["page_size"], 1)
+                self.assertIn("Content View", payload["data"]["source_pages"][0]["content"])
             finally:
                 await self.delete_document_best_effort(document)
                 await self.delete_category_best_effort(category)
