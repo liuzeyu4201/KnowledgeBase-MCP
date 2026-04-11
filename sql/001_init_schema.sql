@@ -159,3 +159,28 @@ CREATE INDEX IF NOT EXISTS idx_kb_import_task_item_status
 CREATE INDEX IF NOT EXISTS idx_kb_import_task_item_task_id ON kb_import_task_item (task_id);
 CREATE INDEX IF NOT EXISTS idx_kb_import_task_item_document_id ON kb_import_task_item (document_id);
 CREATE INDEX IF NOT EXISTS idx_kb_import_task_item_staged_file_id ON kb_import_task_item (staged_file_id);
+
+CREATE TABLE IF NOT EXISTS kb_storage_gc_task (
+    id BIGSERIAL PRIMARY KEY,
+    resource_type VARCHAR(32) NOT NULL,
+    resource_id BIGINT,
+    storage_backend VARCHAR(32) NOT NULL,
+    storage_uri VARCHAR(1024) NOT NULL,
+    action VARCHAR(32) NOT NULL DEFAULT 'delete',
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    retry_count INT NOT NULL DEFAULT 0,
+    max_retry_count INT NOT NULL DEFAULT 20,
+    lease_token VARCHAR(64),
+    lease_expires_at TIMESTAMP,
+    next_retry_at TIMESTAMP,
+    last_error TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_storage_gc_task_status_next_retry_at
+    ON kb_storage_gc_task (status, next_retry_at, id);
+CREATE INDEX IF NOT EXISTS idx_kb_storage_gc_task_resource
+    ON kb_storage_gc_task (resource_type, resource_id);
+CREATE INDEX IF NOT EXISTS idx_kb_storage_gc_task_lease_expires_at
+    ON kb_storage_gc_task (lease_expires_at);

@@ -4,7 +4,7 @@ services:
     container_name: knowledgebase-nginx-dev
     depends_on:
       app:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "${NGINX_PORT:-8080}:80"
     volumes:
@@ -31,6 +31,12 @@ services:
         condition: service_healthy
       milvus:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     volumes:
       - .:/app
     ports:

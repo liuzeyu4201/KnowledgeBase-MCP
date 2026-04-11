@@ -5,13 +5,16 @@ from uuid import uuid4
 
 from knowledgebase.app.config import get_settings
 from knowledgebase.db.bootstrap import init_schema
-from knowledgebase.db.session import SessionFactory, session_scope
+from knowledgebase.db.session import session_scope
 from knowledgebase.domain.exceptions import AppError
+from knowledgebase.integrations.storage.file_storage import FileStorage
 from knowledgebase.repositories.category_repository import CategoryRepository
 from knowledgebase.repositories.chunk_repository import ChunkRepository
 from knowledgebase.repositories.document_repository import DocumentRepository
 from knowledgebase.repositories.import_task_repository import ImportTaskRepository
 from knowledgebase.repositories.staged_file_repository import StagedFileRepository
+from knowledgebase.repositories.storage_gc_task_repository import StorageGCTaskRepository
+from knowledgebase.services.staged_file_service import StagedFileService
 from knowledgebase.services.document_service import DocumentService
 
 
@@ -21,6 +24,7 @@ class ImportTaskWorker:
     def __init__(self) -> None:
         self.settings = get_settings()
         self.worker_token = uuid4().hex
+        self.storage = FileStorage()
 
     def run_forever(self) -> None:
         """持续轮询 PostgreSQL 任务表并执行批量导入任务。"""
@@ -29,6 +33,23 @@ class ImportTaskWorker:
             init_schema()
 
         while True:
+            expired_claimed = 0
+            for _ in range(self.settings.storage_gc_batch_size):
+                if not self._cleanup_next_expired_staged_file():
+                    break
+                expired_claimed += 1
+
+            gc_claimed = 0
+            for _ in range(self.settings.storage_gc_batch_size):
+                gc_task_info = self._claim_next_gc_task()
+                if gc_task_info is None:
+                    break
+                gc_claimed += 1
+                self._process_gc_task(
+                    task_id=gc_task_info["id"],
+                    lease_token=gc_task_info["lease_token"],
+                )
+
             claimed = 0
             for _ in range(self.settings.task_worker_batch_size):
                 task_info = self._claim_next_task()
@@ -37,8 +58,55 @@ class ImportTaskWorker:
                 claimed += 1
                 self._process_task(task_id=task_info["id"], lease_token=task_info["lease_token"])
 
-            if claimed == 0:
+            if claimed == 0 and gc_claimed == 0 and expired_claimed == 0:
                 time.sleep(self.settings.task_worker_poll_interval_seconds)
+
+    def _cleanup_next_expired_staged_file(self) -> bool:
+        """清理一条已过期但未消费的暂存文件。"""
+
+        with session_scope() as session:
+            repository = StagedFileRepository(session)
+            staged_file = repository.claim_next_expired_for_cleanup()
+            if staged_file is None:
+                return False
+
+            service = StagedFileService(repository)
+            service.delete_staged_file_by_id(staged_file.id)
+            return True
+
+    def _claim_next_gc_task(self) -> dict[str, str | int] | None:
+        """抢占下一个待执行的对象清理任务。"""
+
+        with session_scope() as session:
+            repository = StorageGCTaskRepository(session)
+            task = repository.claim_next_task(
+                lease_token=self.worker_token,
+                lease_seconds=self.settings.task_worker_lease_seconds,
+            )
+            if task is None:
+                return None
+            return {
+                "id": task.id,
+                "lease_token": task.lease_token or self.worker_token,
+            }
+
+    def _process_gc_task(self, *, task_id: int, lease_token: str) -> None:
+        """执行单个对象删除任务。"""
+
+        with session_scope() as session:
+            repository = StorageGCTaskRepository(session)
+            task = repository.get_for_execution(task_id=task_id, lease_token=lease_token)
+            if task is None:
+                return
+            try:
+                self.storage.delete_file(task.storage_uri)
+                repository.mark_success(task)
+            except Exception as exc:  # noqa: BLE001
+                repository.mark_failed(
+                    task,
+                    error_message=str(exc),
+                    retry_delay_seconds=30,
+                )
 
     def _claim_next_task(self) -> dict[str, str | int] | None:
         """抢占下一个待执行任务。"""
