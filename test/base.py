@@ -9,9 +9,12 @@ import time
 import unittest
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from docx import Document as DocxDocument
 import httpx
+from minio import Minio
+from minio.error import S3Error
 
 from test.mcp_test_client import MCPToolClient
 
@@ -27,6 +30,22 @@ class MCPIntegrationTestCase(unittest.TestCase):
     large_pdf_path = Path(
         os.getenv("KNOWLEDGEBASE_TEST_LARGE_PDF", "/app/data/Functional Analysis Notes.pdf")
     )
+    minio_endpoint = os.getenv(
+        "KNOWLEDGEBASE_TEST_MINIO_ENDPOINT",
+        os.getenv("KNOWLEDGEBASE_MINIO_ENDPOINT", "127.0.0.1:9000"),
+    )
+    minio_access_key = os.getenv(
+        "KNOWLEDGEBASE_TEST_MINIO_ACCESS_KEY",
+        os.getenv("KNOWLEDGEBASE_MINIO_ACCESS_KEY", "minioadmin"),
+    )
+    minio_secret_key = os.getenv(
+        "KNOWLEDGEBASE_TEST_MINIO_SECRET_KEY",
+        os.getenv("KNOWLEDGEBASE_MINIO_SECRET_KEY", "minioadmin"),
+    )
+    minio_secure = os.getenv(
+        "KNOWLEDGEBASE_TEST_MINIO_SECURE",
+        os.getenv("KNOWLEDGEBASE_MINIO_SECURE", "false"),
+    ).lower() in {"1", "true", "yes", "on"}
 
     def run_async(self, coroutine):
         """在同步 unittest 用例中执行异步逻辑。"""
@@ -370,3 +389,57 @@ class MCPIntegrationTestCase(unittest.TestCase):
             return
         for item in payload["data"]["items"]:
             await self.tool("kb_document_delete", id=item["id"])
+
+    def assert_storage_uri_exists(self, storage_uri: str) -> None:
+        """断言对象或本地文件存在。"""
+
+        if storage_uri.startswith("s3://"):
+            bucket, object_key = self.parse_s3_uri(storage_uri)
+            client = self.build_minio_client()
+            stat = client.stat_object(bucket, object_key)
+            self.assertIsNotNone(stat)
+            return
+        self.assertTrue(Path(storage_uri).exists(), storage_uri)
+
+    def wait_for_storage_uri_deleted(self, storage_uri: str, *, timeout_seconds: float = 10.0) -> None:
+        """轮询等待对象或本地文件被删除。"""
+
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            if not self.storage_uri_exists(storage_uri):
+                return
+            time.sleep(0.2)
+        self.fail(f"storage uri still exists after timeout: {storage_uri}")
+
+    def storage_uri_exists(self, storage_uri: str) -> bool:
+        """判断对象或本地文件是否存在。"""
+
+        if storage_uri.startswith("s3://"):
+            bucket, object_key = self.parse_s3_uri(storage_uri)
+            client = self.build_minio_client()
+            try:
+                client.stat_object(bucket, object_key)
+                return True
+            except S3Error as exc:
+                if exc.code in {"NoSuchKey", "NoSuchObject", "NoSuchBucket"}:
+                    return False
+                raise
+        return Path(storage_uri).exists()
+
+    def build_minio_client(self) -> Minio:
+        """构造测试用 MinIO 客户端。"""
+
+        return Minio(
+            self.minio_endpoint,
+            access_key=self.minio_access_key,
+            secret_key=self.minio_secret_key,
+            secure=self.minio_secure,
+        )
+
+    def parse_s3_uri(self, storage_uri: str) -> tuple[str, str]:
+        """解析 s3://bucket/key 形式的存储 URI。"""
+
+        parsed = urlparse(storage_uri)
+        if parsed.scheme != "s3":
+            raise AssertionError(f"unsupported storage uri: {storage_uri}")
+        return parsed.netloc, parsed.path.lstrip("/")

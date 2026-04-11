@@ -38,6 +38,16 @@ class Settings:
     task_worker_batch_size: int
     staged_file_ttl_seconds: int
     upload_chunk_size_bytes: int
+    object_storage_provider: str
+    minio_endpoint: str
+    minio_access_key: str | None
+    minio_secret_key: str | None
+    minio_secure: bool
+    minio_region: str | None
+    minio_staged_bucket: str
+    minio_document_bucket: str
+    storage_gc_batch_size: int
+    storage_gc_max_retry_count: int
 
 
 @lru_cache(maxsize=1)
@@ -110,9 +120,30 @@ def get_settings() -> Settings:
             os.getenv("KNOWLEDGEBASE_TASK_WORKER_BATCH_SIZE", "1")
         ),
         staged_file_ttl_seconds=int(
-            os.getenv("KNOWLEDGEBASE_STAGED_FILE_TTL_SECONDS", "604800")
+            os.getenv("KNOWLEDGEBASE_STAGED_FILE_TTL_SECONDS", "300")
         ),
         upload_chunk_size_bytes=int(
             os.getenv("KNOWLEDGEBASE_UPLOAD_CHUNK_SIZE_BYTES", "1048576")
+        ),
+        object_storage_provider=os.getenv("KNOWLEDGEBASE_OBJECT_STORAGE_PROVIDER", "local"),
+        minio_endpoint=os.getenv("KNOWLEDGEBASE_MINIO_ENDPOINT", "localhost:9000"),
+        minio_access_key=os.getenv("KNOWLEDGEBASE_MINIO_ACCESS_KEY"),
+        minio_secret_key=os.getenv("KNOWLEDGEBASE_MINIO_SECRET_KEY"),
+        minio_secure=os.getenv("KNOWLEDGEBASE_MINIO_SECURE", "false").lower()
+        in {"1", "true", "yes", "on"},
+        minio_region=os.getenv("KNOWLEDGEBASE_MINIO_REGION"),
+        minio_staged_bucket=os.getenv(
+            "KNOWLEDGEBASE_MINIO_STAGED_BUCKET",
+            "kb-staged-files",
+        ),
+        minio_document_bucket=os.getenv(
+            "KNOWLEDGEBASE_MINIO_DOCUMENT_BUCKET",
+            "kb-documents",
+        ),
+        storage_gc_batch_size=int(
+            os.getenv("KNOWLEDGEBASE_STORAGE_GC_BATCH_SIZE", "10")
+        ),
+        storage_gc_max_retry_count=int(
+            os.getenv("KNOWLEDGEBASE_STORAGE_GC_MAX_RETRY_COUNT", "20")
         ),
     )

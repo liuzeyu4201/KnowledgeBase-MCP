@@ -1,6 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
+
+import knowledgebase.db.bootstrap  # noqa: F401
+
+from knowledgebase.db.session import SessionFactory
+from knowledgebase.repositories.staged_file_repository import StagedFileRepository
+from knowledgebase.services.staged_file_service import StagedFileService
 
 from test.base import MCPIntegrationTestCase
 
@@ -17,6 +24,9 @@ class StagedFileContractTestCase(MCPIntegrationTestCase):
             )
             self.assertEqual(staged_file["status"], "uploaded")
             self.assertEqual(staged_file["source_type"], "md")
+            self.assertEqual(staged_file["storage_backend"], "minio")
+            self.assertTrue(staged_file["storage_uri"].startswith("s3://"))
+            self.assert_storage_uri_exists(staged_file["storage_uri"])
 
             get_payload = await self.tool("kb_staged_file_get", id=staged_file["id"])
             self.assert_success(get_payload)
@@ -35,6 +45,7 @@ class StagedFileContractTestCase(MCPIntegrationTestCase):
             delete_payload = await self.tool("kb_staged_file_delete", id=staged_file["id"])
             self.assert_success(delete_payload)
             self.assertEqual(delete_payload["data"]["staged_file"]["status"], "deleted")
+            self.wait_for_storage_uri_deleted(staged_file["storage_uri"])
 
         self.run_async(scenario())
 
@@ -56,6 +67,7 @@ class StagedFileContractTestCase(MCPIntegrationTestCase):
                 file_bytes=self.read_pdf_bytes(),
                 mime_type="application/pdf",
             )
+            self.assert_storage_uri_exists(staged_file["storage_uri"])
             document = None
             try:
                 payload = await self.tool(
@@ -75,6 +87,8 @@ class StagedFileContractTestCase(MCPIntegrationTestCase):
                     staged_get_payload["data"]["staged_file"]["linked_document_id"],
                     document["id"],
                 )
+                self.assert_storage_uri_exists(document["storage_uri"])
+                self.wait_for_storage_uri_deleted(staged_file["storage_uri"])
             finally:
                 if document is not None:
                     await self.delete_document_best_effort(document)
@@ -92,6 +106,7 @@ class StagedFileContractTestCase(MCPIntegrationTestCase):
                 mime_type="text/markdown",
                 file_content_base64=self.read_markdown_base64(title="Before Staged Update"),
             )
+            old_storage_uri = document["storage_uri"]
             staged_file = self.upload_staged_file(
                 file_name="after.docx",
                 file_bytes=self.read_docx_bytes(title="After Staged Update"),
@@ -113,6 +128,9 @@ class StagedFileContractTestCase(MCPIntegrationTestCase):
                 )
                 self.assertEqual(updated["source_type"], "docx")
                 self.assertEqual(updated["version"], 2)
+                self.assert_storage_uri_exists(updated["storage_uri"])
+                self.wait_for_storage_uri_deleted(old_storage_uri)
+                self.wait_for_storage_uri_deleted(staged_file["storage_uri"])
             finally:
                 await self.delete_document_best_effort(document)
                 await self.delete_category_best_effort(category)
@@ -208,3 +226,95 @@ class StagedFileContractTestCase(MCPIntegrationTestCase):
                 await self.delete_category_best_effort(category)
 
         self.run_async(scenario())
+
+    def test_expired_uploaded_staged_file_is_cleaned(self) -> None:
+        staged_file = self.upload_staged_file(
+            file_name="expired-cleanup.md",
+            file_bytes=self.read_markdown_bytes(title="Expired Cleanup"),
+            mime_type="text/markdown",
+        )
+        self.assert_storage_uri_exists(staged_file["storage_uri"])
+
+        session = SessionFactory()
+        try:
+            repository = StagedFileRepository(session)
+            model = repository.get_by_id(staged_file["id"])
+            self.assertIsNotNone(model)
+            assert model is not None
+            model.expires_at = datetime.utcnow() - timedelta(minutes=10)
+            session.add(model)
+            session.commit()
+        finally:
+            session.close()
+
+        session = SessionFactory()
+        try:
+            repository = StagedFileRepository(session)
+            claimed = repository.claim_next_expired_for_cleanup(staged_file_id=staged_file["id"])
+            self.assertIsNotNone(claimed)
+            assert claimed is not None
+            self.assertEqual(claimed.status, "expired")
+
+            service = StagedFileService(repository)
+            service.delete_staged_file_by_id(staged_file["id"])
+            session.commit()
+        finally:
+            session.close()
+
+        self.wait_for_storage_uri_deleted(staged_file["storage_uri"])
+        session = SessionFactory()
+        try:
+            repository = StagedFileRepository(session)
+            deleted = repository.get_by_id(staged_file["id"], include_deleted=True)
+            self.assertIsNotNone(deleted)
+            assert deleted is not None
+            self.assertEqual(deleted.status, "deleted")
+            self.assertIsNotNone(deleted.deleted_at)
+        finally:
+            session.close()
+
+    def test_consuming_staged_file_is_not_cleaned_by_expired_sweep(self) -> None:
+        staged_file = self.upload_staged_file(
+            file_name="consuming-guard.md",
+            file_bytes=self.read_markdown_bytes(title="Consuming Guard"),
+            mime_type="text/markdown",
+        )
+        self.assert_storage_uri_exists(staged_file["storage_uri"])
+
+        session = SessionFactory()
+        try:
+            repository = StagedFileRepository(session)
+            model = repository.get_by_id(staged_file["id"])
+            self.assertIsNotNone(model)
+            assert model is not None
+            repository.mark_consuming(model)
+            model.expires_at = datetime.utcnow() - timedelta(minutes=10)
+            session.add(model)
+            session.commit()
+        finally:
+            session.close()
+
+        session = SessionFactory()
+        try:
+            repository = StagedFileRepository(session)
+            claimed = repository.claim_next_expired_for_cleanup(staged_file_id=staged_file["id"])
+            self.assertIsNone(claimed)
+        finally:
+            session.close()
+
+        self.assert_storage_uri_exists(staged_file["storage_uri"])
+
+        session = SessionFactory()
+        try:
+            repository = StagedFileRepository(session)
+            model = repository.get_by_id(staged_file["id"])
+            self.assertIsNotNone(model)
+            assert model is not None
+            repository.mark_expired(model)
+            service = StagedFileService(repository)
+            service.delete_staged_file_by_id(staged_file["id"])
+            session.commit()
+        finally:
+            session.close()
+
+        self.wait_for_storage_uri_deleted(staged_file["storage_uri"])

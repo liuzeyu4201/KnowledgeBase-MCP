@@ -38,6 +38,13 @@ def create_http_app() -> Starlette:
     mcp_app = mcp.streamable_http_app()
     upload_app = FastAPI(title=f"{settings.app_name} Upload API")
     upload_app.add_middleware(RequestContextMiddleware)
+
+    @upload_app.get("/healthz")
+    def healthz() -> dict[str, str]:
+        """提供容器级健康检查端点，仅在应用启动完成后返回成功。"""
+
+        return {"status": "ok"}
+
     upload_app.include_router(staged_file_router)
     upload_app.include_router(page_router)
     upload_app.include_router(api_router)

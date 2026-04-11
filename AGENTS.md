@@ -117,7 +117,9 @@
 
 * 业务主库使用 PostgreSQL
 * 向量检索使用 Milvus
-* 原始 PDF 使用本地文件存储
+* 业务原始文件与暂存文件使用 MinIO 对象存储
+* 数据库通过 `storage_uri` 和 `storage_backend` 记录对象引用
+* 已落地对象清理任务表 `kb_storage_gc_task`，用于删除失败后的补偿回收
 * Milvus 当前采用：
   * 稠密向量：Embedding 模型生成
   * 词法检索：Milvus BM25

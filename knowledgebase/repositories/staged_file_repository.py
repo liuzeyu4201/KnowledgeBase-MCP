@@ -12,6 +12,7 @@ class StagedFileRepository:
     """暂存文件数据访问层。"""
 
     DELETABLE_STATUSES = {"uploaded", "failed", "expired"}
+    EXPIRABLE_STATUSES = {"uploaded", "failed", "expired"}
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -126,14 +127,12 @@ class StagedFileRepository:
         staged_file: StagedFileModel,
         *,
         linked_document_id: int,
-        final_storage_uri: str,
     ) -> StagedFileModel:
         """标记暂存文件已被消费。"""
 
         staged_file.status = "consumed"
         staged_file.consumed_at = datetime.utcnow()
         staged_file.linked_document_id = linked_document_id
-        staged_file.storage_uri = final_storage_uri
         staged_file.last_error = None
         self.session.add(staged_file)
         self.session.flush()
@@ -167,4 +166,37 @@ class StagedFileRepository:
         self.session.add(staged_file)
         self.session.flush()
         self.session.refresh(staged_file)
+        return staged_file
+
+    def claim_next_expired_for_cleanup(
+        self,
+        *,
+        staged_file_id: int | None = None,
+    ) -> StagedFileModel | None:
+        """抢占下一条已过期暂存文件，并标记为 expired。"""
+
+        now = datetime.utcnow()
+        stmt = (
+            select(StagedFileModel)
+            .where(
+                StagedFileModel.deleted_at.is_(None),
+                StagedFileModel.expires_at.is_not(None),
+                StagedFileModel.expires_at <= now,
+                StagedFileModel.status.in_(self.EXPIRABLE_STATUSES),
+            )
+            .order_by(StagedFileModel.expires_at.asc(), StagedFileModel.id.asc())
+            .with_for_update(skip_locked=True)
+        )
+        if staged_file_id is not None:
+            stmt = stmt.where(StagedFileModel.id == staged_file_id)
+
+        staged_file = self.session.scalar(stmt)
+        if staged_file is None:
+            return None
+        if staged_file.status != "expired":
+            staged_file.status = "expired"
+            staged_file.last_error = None
+            self.session.add(staged_file)
+            self.session.flush()
+            self.session.refresh(staged_file)
         return staged_file

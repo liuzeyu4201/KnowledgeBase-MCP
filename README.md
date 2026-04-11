@@ -146,7 +146,15 @@
 
 ### 文件存储
 
-当前开发环境默认走本地存储目录，远端标准协议通过 HTTP 上传接口创建暂存文件。
+- 业务文件存储：MinIO
+- 暂存文件与正式文档原件都保存为 `s3://bucket/key` 形式的对象 URI
+- PostgreSQL 保存文件元数据和对象引用
+- 删除失败时会落 `kb_storage_gc_task` 进入后台补偿清理
+
+当前开发环境默认 bucket：
+
+- 暂存文件：`kb-staged-files`
+- 正式文档：`kb-documents`
 
 ### 检索策略
 
