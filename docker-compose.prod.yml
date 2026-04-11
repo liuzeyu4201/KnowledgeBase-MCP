@@ -20,7 +20,6 @@ services:
     env_file:
       - .env.prod
     environment:
-      KNOWLEDGEBASE_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       KNOWLEDGEBASE_MILVUS_HOST: milvus
       KNOWLEDGEBASE_MILVUS_PORT: 19530
       KNOWLEDGEBASE_MCP_TRANSPORT: http
@@ -46,7 +45,6 @@ services:
     env_file:
       - .env.prod
     environment:
-      KNOWLEDGEBASE_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       KNOWLEDGEBASE_MILVUS_HOST: milvus
       KNOWLEDGEBASE_MILVUS_PORT: 19530
       KNOWLEDGEBASE_AUTO_INIT_SCHEMA: "true"
