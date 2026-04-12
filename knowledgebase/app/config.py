@@ -6,6 +6,25 @@ from functools import lru_cache
 
 
 @dataclass(frozen=True)
+class EmbeddingSettings:
+    """Embedding 服务配置。"""
+
+    provider: str
+    api_key: str | None
+    base_url: str
+    model: str
+    dimension: int
+    timeout_seconds: float
+    max_batch_size: int
+
+    @property
+    def asset_id(self) -> str:
+        """返回用于标识持久化向量资产的稳定签名。"""
+
+        return f"{self.provider}:{self.model}:{self.dimension}"
+
+
+@dataclass(frozen=True)
 class Settings:
     """应用配置。"""
 
@@ -25,11 +44,7 @@ class Settings:
     milvus_analyzer: str
     milvus_recreate_collection: bool
     storage_root: str
-    embedding_provider: str
-    embedding_api_key: str | None
-    embedding_base_url: str
-    embedding_model: str
-    embedding_dimension: int
+    embedding: EmbeddingSettings
     chunk_size: int
     chunk_overlap: int
     task_worker_poll_interval_seconds: float
@@ -48,6 +63,43 @@ class Settings:
     minio_document_bucket: str
     storage_gc_batch_size: int
     storage_gc_max_retry_count: int
+
+
+def _read_text_env(name: str, default: str = "") -> str:
+    """读取字符串环境变量并去除首尾空白。"""
+
+    return os.getenv(name, default).strip()
+
+
+def _read_optional_text_env(name: str) -> str | None:
+    """读取可选字符串环境变量，空值统一视为未配置。"""
+
+    value = _read_text_env(name)
+    return value or None
+
+
+def _read_int_env(name: str, default: int) -> int:
+    """读取整型环境变量，非法值回落为约定默认值，由启动校验统一拦截。"""
+
+    raw_value = _read_text_env(name)
+    if not raw_value:
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        return -1
+
+
+def _read_float_env(name: str, default: float) -> float:
+    """读取浮点环境变量，非法值回落为约定默认值，由启动校验统一拦截。"""
+
+    raw_value = _read_text_env(name)
+    if not raw_value:
+        return default
+    try:
+        return float(raw_value)
+    except ValueError:
+        return -1.0
 
 
 @lru_cache(maxsize=1)
@@ -94,17 +146,15 @@ def get_settings() -> Settings:
         ).lower()
         in {"1", "true", "yes", "on"},
         storage_root=os.getenv("KNOWLEDGEBASE_STORAGE_ROOT", "./data/storage"),
-        embedding_provider=os.getenv("KNOWLEDGEBASE_EMBEDDING_PROVIDER", "aliyun"),
-        embedding_api_key=os.getenv("DASHSCOPE_API_KEY"),
-        embedding_base_url=os.getenv(
-            "KNOWLEDGEBASE_EMBEDDING_BASE_URL",
-            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        embedding=EmbeddingSettings(
+            provider=_read_text_env("KNOWLEDGEBASE_EMBEDDING_PROVIDER").lower(),
+            api_key=_read_optional_text_env("KNOWLEDGEBASE_EMBEDDING_API_KEY"),
+            base_url=_read_text_env("KNOWLEDGEBASE_EMBEDDING_BASE_URL"),
+            model=_read_text_env("KNOWLEDGEBASE_EMBEDDING_MODEL"),
+            dimension=_read_int_env("KNOWLEDGEBASE_EMBEDDING_DIMENSION", 0),
+            timeout_seconds=_read_float_env("KNOWLEDGEBASE_EMBEDDING_TIMEOUT_SECONDS", 60.0),
+            max_batch_size=_read_int_env("KNOWLEDGEBASE_EMBEDDING_MAX_BATCH_SIZE", 32),
         ),
-        embedding_model=os.getenv(
-            "KNOWLEDGEBASE_EMBEDDING_MODEL",
-            "text-embedding-v4",
-        ),
-        embedding_dimension=int(os.getenv("KNOWLEDGEBASE_EMBEDDING_DIMENSION", "1024")),
         chunk_size=int(os.getenv("KNOWLEDGEBASE_CHUNK_SIZE", "800")),
         chunk_overlap=int(os.getenv("KNOWLEDGEBASE_CHUNK_OVERLAP", "100")),
         task_worker_poll_interval_seconds=float(

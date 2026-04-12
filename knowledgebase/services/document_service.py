@@ -575,9 +575,9 @@ class DocumentService:
             )
 
     def _embedding_model_name(self) -> str:
-        """返回当前向量模型名。"""
+        """返回当前向量资产标识。"""
 
-        return getattr(self.embedder, "model", "mock-embedding")
+        return getattr(self.embedder, "asset_id", getattr(self.embedder, "model", "unknown-embedding"))
 
     def _import_document_from_bytes(
         self,

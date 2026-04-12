@@ -7,6 +7,7 @@ from knowledgebase.app.config import get_settings
 from knowledgebase.db.bootstrap import init_schema
 from knowledgebase.db.session import session_scope
 from knowledgebase.domain.exceptions import AppError
+from knowledgebase.integrations.embedding.validator import validate_embedding_startup
 from knowledgebase.integrations.storage.file_storage import FileStorage
 from knowledgebase.repositories.category_repository import CategoryRepository
 from knowledgebase.repositories.chunk_repository import ChunkRepository
@@ -31,6 +32,8 @@ class ImportTaskWorker:
 
         if self.settings.auto_init_schema:
             init_schema()
+
+        validate_embedding_startup()
 
         while True:
             expired_claimed = 0

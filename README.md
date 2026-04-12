@@ -217,6 +217,18 @@ cp .env.prod.example .env.prod
 uv sync
 ```
 
+Embedding 配置约定：
+
+- 开发环境样例默认使用主机 Ollama 的 OpenAI 兼容接口：`http://host.docker.internal:11434/v1`
+- 当前开发样例模型：`qwen3-embedding:0.6b`
+- 统一使用 `KNOWLEDGEBASE_EMBEDDING_PROVIDER`
+- 统一使用 `KNOWLEDGEBASE_EMBEDDING_API_KEY`
+- 统一使用 `KNOWLEDGEBASE_EMBEDDING_BASE_URL`
+- 统一使用 `KNOWLEDGEBASE_EMBEDDING_MODEL`
+- 统一使用 `KNOWLEDGEBASE_EMBEDDING_DIMENSION`
+- 服务启动时会校验配置、远端 embedding 可用性，以及现有向量资产与 Milvus 维度是否匹配
+- 当前不再允许 `mock` 作为运行时 embedding provider
+
 语法检查：
 
 ```bash

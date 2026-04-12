@@ -8,6 +8,7 @@ from starlette.applications import Starlette
 
 from knowledgebase.app.config import get_settings
 from knowledgebase.db.bootstrap import init_schema
+from knowledgebase.integrations.embedding.validator import validate_embedding_startup
 from knowledgebase.http.staged_file_routes import router as staged_file_router
 from knowledgebase.mcp.tools.category_tools import register_category_tools
 from knowledgebase.mcp.tools.document_tools import register_document_tools
@@ -60,6 +61,8 @@ def run() -> None:
     if settings.auto_init_schema:
         # 第一阶段采用自动建表，便于本地开发快速启动。
         init_schema()
+
+    validate_embedding_startup()
 
     # 容器化部署优先使用 HTTP 传输，本地命令行调试仍可继续使用 stdio。
     if settings.mcp_transport == "stdio":

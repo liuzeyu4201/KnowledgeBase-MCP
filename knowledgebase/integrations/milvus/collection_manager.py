@@ -50,7 +50,7 @@ class MilvusCollectionManager:
         schema.add_field(
             "dense_vector",
             DataType.FLOAT_VECTOR,
-            dim=self.settings.embedding_dimension,
+            dim=self.settings.embedding.dimension,
         )
         schema.add_field("sparse_vector", DataType.SPARSE_FLOAT_VECTOR)
 
@@ -196,6 +196,21 @@ class MilvusCollectionManager:
             ],
         )
         return list(result)
+
+    def get_existing_dense_vector_dimension(self) -> int | None:
+        """读取现有 Collection 的稠密向量维度。"""
+
+        if not self.client.has_collection(self.collection_name):
+            return None
+
+        description = self.client.describe_collection(collection_name=self.collection_name)
+        for field in description.get("fields", []):
+            if field.get("name") != "dense_vector":
+                continue
+            params = field.get("params") or {}
+            dimension = params.get("dim", field.get("dim"))
+            return int(dimension) if dimension is not None else None
+        return None
 
     def _build_analyzer_params(self) -> dict[str, Any]:
         """构建 BM25 文本分析器参数。"""
