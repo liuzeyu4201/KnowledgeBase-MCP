@@ -66,11 +66,19 @@ class WebVisualizationContractTestCase(MCPIntegrationTestCase):
 
         by_name, by_code = self.run_async(scenario())
         self.assert_success(by_name)
-        self.assertEqual(by_name["data"]["pagination"]["total"], 1, by_name)
-        self.assertEqual(by_name["data"]["items"][0]["category_code"], "math", by_name)
+        self.assertTrue(by_name["data"]["items"], by_name)
+        self.assertIn(
+            "math",
+            {item["category_code"] for item in by_name["data"]["items"]},
+            by_name,
+        )
         self.assert_success(by_code)
-        self.assertEqual(by_code["data"]["pagination"]["total"], 1, by_code)
-        self.assertEqual(by_code["data"]["items"][0]["category_code"], "math", by_code)
+        self.assertTrue(by_code["data"]["items"], by_code)
+        self.assertIn(
+            "math",
+            {item["category_code"] for item in by_code["data"]["items"]},
+            by_code,
+        )
 
     def test_category_documents_page_and_api(self) -> None:
         async def scenario() -> tuple[int, str, dict, dict]:

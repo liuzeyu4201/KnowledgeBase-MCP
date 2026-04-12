@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 
 from knowledgebase.domain.exceptions import AppError
 from knowledgebase.repositories.category_repository import CategoryRepository
@@ -51,12 +52,19 @@ class CategoryService:
                 details={"field": "name", "value": data.name},
             )
 
-        category = self.repository.create(
-            category_code=data.category_code,
-            name=data.name,
-            description=data.description,
-            status=data.status,
-        )
+        try:
+            category = self.repository.create(
+                category_code=data.category_code,
+                name=data.name,
+                description=data.description,
+                status=data.status,
+            )
+        except IntegrityError as exc:
+            raise self._map_category_integrity_error(
+                exc,
+                category_code=data.category_code,
+                name=data.name,
+            ) from exc
         return CategoryOutput.from_model(category)
 
     def get_category(self, payload: dict) -> CategoryOutput:
@@ -168,13 +176,20 @@ class CategoryService:
                 )
 
         # 更新操作集中在服务层进行字段决策，保证 repository 只负责持久化。
-        updated = self.repository.update(
-            category,
-            category_code=data.new_category_code,
-            name=data.name,
-            description=data.description,
-            status=data.status,
-        )
+        try:
+            updated = self.repository.update(
+                category,
+                category_code=data.new_category_code,
+                name=data.name,
+                description=data.description,
+                status=data.status,
+            )
+        except IntegrityError as exc:
+            raise self._map_category_integrity_error(
+                exc,
+                category_code=data.new_category_code or category.category_code,
+                name=data.name or category.name,
+            ) from exc
         return CategoryOutput.from_model(updated)
 
     def delete_category(self, payload: dict) -> dict:
@@ -257,3 +272,46 @@ class CategoryService:
                 message="at least one update field is required",
                 error_type="validation_error",
             )
+
+    def _map_category_integrity_error(
+        self,
+        exc: IntegrityError,
+        *,
+        category_code: str,
+        name: str,
+    ) -> AppError:
+        """把数据库唯一约束错误转换为稳定业务错误。"""
+
+        constraint_name = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+        if constraint_name == "ix_kb_category_category_code":
+            return AppError(
+                code="CATEGORY_CODE_CONFLICT",
+                message="category code already exists",
+                error_type="business_error",
+                details={"field": "category_code", "value": category_code},
+            )
+        if constraint_name == "ix_kb_category_name":
+            return AppError(
+                code="CATEGORY_NAME_CONFLICT",
+                message="category name already exists",
+                error_type="business_error",
+                details={"field": "name", "value": name},
+            )
+
+        error_text = str(exc)
+        if "ix_kb_category_category_code" in error_text:
+            return AppError(
+                code="CATEGORY_CODE_CONFLICT",
+                message="category code already exists",
+                error_type="business_error",
+                details={"field": "category_code", "value": category_code},
+            )
+        if "ix_kb_category_name" in error_text:
+            return AppError(
+                code="CATEGORY_NAME_CONFLICT",
+                message="category name already exists",
+                error_type="business_error",
+                details={"field": "name", "value": name},
+            )
+
+        raise exc

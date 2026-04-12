@@ -34,6 +34,8 @@
 - `kb_document_import_from_staged`
 - `kb_document_update_from_staged`
 - `kb_document_delete`
+- `kb_document_task_get`
+- `kb_document_task_cancel`
 
 ### 暂存文件能力
 
@@ -85,14 +87,18 @@
 2. 若分类不存在，调用 `kb_category_create`
 3. `POST /api/staged-files` 上传文件
 4. 调用 `kb_document_import_from_staged`
-5. 调用 `kb_document_get` 或 `kb_document_list` 验证导入结果
-6. 调用 `kb_search_retrieve` 做召回验证
+5. 默认返回 `task`，轮询 `kb_document_task_get`
+6. 任务成功后调用 `kb_document_get` 或 `kb_document_list` 验证导入结果
+7. 如需强制同步执行，可传 `execution_mode="sync"`
+8. 调用 `kb_search_retrieve` 做召回验证
 
 ### 文档更新
 
 1. 先上传新文件到 `/api/staged-files`
 2. 调用 `kb_document_update_from_staged`
-3. 系统执行整篇重建
+3. 带 `staged_file_id` 的更新默认返回 `task`，轮询 `kb_document_task_get`
+4. 仅元数据更新仍同步返回 `document`
+5. 如需强制同步执行，可传 `execution_mode="sync"`
 
 ### 批量异步导入
 

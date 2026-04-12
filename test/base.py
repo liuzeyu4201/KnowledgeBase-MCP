@@ -223,8 +223,8 @@ class MCPIntegrationTestCase(unittest.TestCase):
             title=f"{title_prefix}_{suffix}",
             staged_file_id=staged_file["id"],
         )
-        self.assert_success(payload)
-        return payload["data"]["document"]
+        document, _ = await self.resolve_document_write_payload(payload)
+        return document
 
     async def update_document(
         self,
@@ -254,6 +254,18 @@ class MCPIntegrationTestCase(unittest.TestCase):
             payload["staged_file_id"] = staged_file["id"]
 
         result = await self.tool("kb_document_update_from_staged", **payload)
+        if result.get("success") and "task" in result.get("data", {}):
+            document, task = await self.resolve_document_write_payload(
+                result,
+                document_id_hint=document_id,
+            )
+            return {
+                **result,
+                "data": {
+                    "document": document,
+                    "task": task,
+                },
+            }
         return result
 
     async def submit_batch_import_task(
@@ -389,6 +401,65 @@ class MCPIntegrationTestCase(unittest.TestCase):
             return
         for item in payload["data"]["items"]:
             await self.tool("kb_document_delete", id=item["id"])
+
+    async def resolve_document_write_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        document_id_hint: int | None = None,
+        timeout_seconds: float = 120.0,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """把文档写入返回统一解析成最终文档。"""
+
+        self.assert_success(payload)
+        data = payload.get("data", {})
+        document = data.get("document")
+        if isinstance(document, dict):
+            return document, None
+
+        task = data.get("task")
+        if not isinstance(task, dict):
+            self.fail(f"unexpected document write payload: {payload}")
+
+        return await self.wait_for_document_task_document(
+            task=task,
+            document_id_hint=document_id_hint,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def wait_for_document_task_document(
+        self,
+        *,
+        task: dict[str, Any],
+        document_id_hint: int | None = None,
+        timeout_seconds: float = 120.0,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """轮询文档异步任务，直到拿到最终文档。"""
+
+        deadline = time.monotonic() + timeout_seconds
+        final_task = task
+        while time.monotonic() < deadline:
+            get_payload = await self.tool(
+                "kb_document_task_get",
+                id=task["id"],
+                include_items=True,
+            )
+            self.assert_success(get_payload)
+            final_task = get_payload["data"]["task"]
+            if final_task["status"] in {"success", "partial_success", "failed", "canceled"}:
+                break
+            await asyncio.sleep(1)
+
+        self.assertIn(final_task["status"], {"success", "partial_success"}, final_task)
+        items = final_task.get("items") or []
+        document_id = document_id_hint
+        if items:
+            document_id = items[0].get("document_id") or document_id
+        self.assertIsNotNone(document_id, final_task)
+
+        get_payload = await self.tool("kb_document_get", id=document_id)
+        self.assert_success(get_payload)
+        return get_payload["data"]["document"], final_task
 
     def assert_storage_uri_exists(self, storage_uri: str) -> None:
         """断言对象或本地文件存在。"""

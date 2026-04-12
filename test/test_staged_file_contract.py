@@ -77,8 +77,10 @@ class StagedFileContractTestCase(MCPIntegrationTestCase):
                     staged_file_id=staged_file["id"],
                 )
                 self.assert_success(payload)
-                document = payload["data"]["document"]
+                self.assertIn("task", payload["data"])
+                document, task = await self.resolve_document_write_payload(payload)
                 self.assertGreaterEqual(document["chunk_count"], 1)
+                self.assertEqual(task["task_type"], "document_import_batch")
 
                 staged_get_payload = await self.tool("kb_staged_file_get", id=staged_file["id"])
                 self.assert_success(staged_get_payload)
@@ -120,7 +122,11 @@ class StagedFileContractTestCase(MCPIntegrationTestCase):
                     staged_file_id=staged_file["id"],
                 )
                 self.assert_success(payload)
-                updated = payload["data"]["document"]
+                self.assertIn("task", payload["data"])
+                updated, task = await self.resolve_document_write_payload(
+                    payload,
+                    document_id_hint=document["id"],
+                )
                 self.assertEqual(updated["title"], "staged_update_after")
                 self.assertEqual(
                     updated["mime_type"],
@@ -128,6 +134,7 @@ class StagedFileContractTestCase(MCPIntegrationTestCase):
                 )
                 self.assertEqual(updated["source_type"], "docx")
                 self.assertEqual(updated["version"], 2)
+                self.assertEqual(task["task_type"], "document_update_batch")
                 self.assert_storage_uri_exists(updated["storage_uri"])
                 self.wait_for_storage_uri_deleted(old_storage_uri)
                 self.wait_for_storage_uri_deleted(staged_file["storage_uri"])
@@ -154,7 +161,7 @@ class StagedFileContractTestCase(MCPIntegrationTestCase):
                     staged_file_id=staged_file["id"],
                 )
                 self.assert_success(payload)
-                document = payload["data"]["document"]
+                document, _ = await self.resolve_document_write_payload(payload)
 
                 delete_payload = await self.tool("kb_staged_file_delete", id=staged_file["id"])
                 self.assert_error(

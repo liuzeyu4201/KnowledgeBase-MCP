@@ -42,6 +42,7 @@ class ImportTaskRepository:
     def create_task(
         self,
         *,
+        task_type: str,
         priority: int,
         total_items: int,
         request_id: str | None,
@@ -54,6 +55,7 @@ class ImportTaskRepository:
 
         now = datetime.utcnow()
         task = ImportTaskModel(
+            task_type=task_type,
             status="queued",
             priority=priority,
             idempotency_key=idempotency_key,
@@ -145,7 +147,6 @@ class ImportTaskRepository:
         stmt: Select[tuple[ImportTaskModel]] = (
             select(ImportTaskModel)
             .where(
-                ImportTaskModel.task_type == "document_import_batch",
                 or_(
                     ImportTaskModel.status == "queued",
                     (

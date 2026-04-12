@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 from knowledgebase.db.session import session_scope
 from knowledgebase.domain.exceptions import AppError
@@ -38,20 +39,15 @@ async def upload_staged_file(
     }
 
     try:
-        with session_scope() as session:
-            service = StagedFileService(StagedFileRepository(session))
-            staged_file = service.create_from_stream(
-                file_name=file.filename or "uploaded-file",
-                file_stream=file.file,
-                mime_type=file.content_type,
-            )
-            return JSONResponse(
-                content=build_success_response(
-                    data={"staged_file": staged_file.model_dump(mode="json")},
-                    request_id=request_id,
-                    trace_id=trace_id,
-                )
-            )
+        response_payload = await run_in_threadpool(
+            _create_staged_file_response,
+            file_name=file.filename or "uploaded-file",
+            file_stream=file.file,
+            mime_type=file.content_type,
+            request_id=request_id,
+            trace_id=trace_id,
+        )
+        return JSONResponse(content=response_payload)
     except AppError as exc:
         return JSONResponse(
             status_code=400 if exc.error_type != "system_error" else 500,
@@ -90,6 +86,30 @@ async def upload_staged_file(
         )
     finally:
         await file.close()
+
+
+def _create_staged_file_response(
+    *,
+    file_name: str,
+    file_stream,
+    mime_type: str | None,
+    request_id: str | None,
+    trace_id: str | None,
+) -> dict[str, Any]:
+    """在线程池中执行暂存文件上传，避免阻塞主事件循环。"""
+
+    with session_scope() as session:
+        service = StagedFileService(StagedFileRepository(session))
+        staged_file = service.create_from_stream(
+            file_name=file_name,
+            file_stream=file_stream,
+            mime_type=mime_type,
+        )
+        return build_success_response(
+            data={"staged_file": staged_file.model_dump(mode="json")},
+            request_id=request_id,
+            trace_id=trace_id,
+        )
 
 
 @router.get("/{staged_file_id}")
