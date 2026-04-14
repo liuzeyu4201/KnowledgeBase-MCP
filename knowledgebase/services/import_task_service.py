@@ -13,7 +13,6 @@ from knowledgebase.schemas.import_task import (
     ImportTaskCancelInput,
     ImportTaskGetInput,
     ImportTaskOutput,
-    ImportTaskSubmitSingleFromStagedInput,
     ImportTaskSubmitFromStagedInput,
     ImportTaskSubmitUpdateFromStagedInput,
 )
@@ -95,58 +94,6 @@ class ImportTaskService:
                 )
             )
         items = self.repository.create_items(item_rows)
-        return ImportTaskOutput.from_model(task, items=items)
-
-    def submit_single_import_task_from_staged(self, payload: dict) -> ImportTaskOutput:
-        """提交单文档异步导入任务。"""
-
-        try:
-            data = ImportTaskSubmitSingleFromStagedInput.model_validate(payload)
-        except ValidationError as exc:
-            raise AppError(
-                code="INVALID_ARGUMENT",
-                message="单文档导入任务参数不合法",
-                error_type="validation_error",
-                details={"errors": exc.errors()},
-            ) from exc
-
-        self._validate_category_exists(data.category_id)
-        self._validate_staged_file_for_submit(data.staged_file_id)
-
-        task = self._create_task_with_idempotency_fallback(
-            task_type="document_import_batch",
-            priority=data.priority,
-            total_items=1,
-            request_id=data.request_id,
-            operator=data.operator,
-            trace_id=data.trace_id,
-            idempotency_key=data.idempotency_key,
-            max_attempts=data.max_attempts,
-        )
-        if isinstance(task, ImportTaskOutput):
-            return task
-
-        staged_file = self.staged_file_repository.get_for_update(data.staged_file_id)
-        if staged_file is None:
-            raise AppError(
-                code="STAGED_FILE_NOT_FOUND",
-                message="staged file not found",
-                error_type="not_found",
-                details={"staged_file_id": data.staged_file_id},
-            )
-        self.staged_file_repository.link_task(staged_file, task_id=task.id)
-        items = self.repository.create_items(
-            [
-                self._build_staged_file_item_row(
-                    task_id=task.id,
-                    item_no=1,
-                    priority=data.priority,
-                    category_id=data.category_id,
-                    title=data.title,
-                    staged_file=staged_file,
-                )
-            ]
-        )
         return ImportTaskOutput.from_model(task, items=items)
 
     def submit_update_task_from_staged(self, payload: dict) -> ImportTaskOutput:

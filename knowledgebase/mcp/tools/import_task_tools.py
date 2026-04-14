@@ -83,7 +83,7 @@ def register_import_task_tools(mcp: Any) -> None:
 
     @mcp.tool(
         name="kb_document_task_cancel",
-        description="取消文档异步任务。兼容单文档导入、单文档更新和批量导入任务。",
+        description="取消文档异步任务。兼容单文档更新和批量导入任务。",
     )
     async def kb_document_task_cancel(
         id: int | None = None,
@@ -130,7 +130,7 @@ def register_import_task_tools(mcp: Any) -> None:
 
     @mcp.tool(
         name="kb_document_task_get",
-        description="查询文档异步任务状态。兼容单文档导入、单文档更新和批量导入任务。",
+        description="查询文档异步任务状态。兼容单文档更新和批量导入任务。",
     )
     async def kb_document_task_get(
         id: int | None = None,

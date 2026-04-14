@@ -77,10 +77,11 @@ class StagedFileContractTestCase(MCPIntegrationTestCase):
                     staged_file_id=staged_file["id"],
                 )
                 self.assert_success(payload)
-                self.assertIn("task", payload["data"])
+                self.assertIn("document", payload["data"])
+                self.assertNotIn("task", payload["data"])
                 document, task = await self.resolve_document_write_payload(payload)
                 self.assertGreaterEqual(document["chunk_count"], 1)
-                self.assertEqual(task["task_type"], "document_import_batch")
+                self.assertIsNone(task)
 
                 staged_get_payload = await self.tool("kb_staged_file_get", id=staged_file["id"])
                 self.assert_success(staged_get_payload)

@@ -42,31 +42,6 @@ class ImportTaskSubmitFromStagedInput(BaseModel):
         return _strip_or_none(value)
 
 
-class ImportTaskSubmitSingleFromStagedInput(BaseModel):
-    request_id: str | None = None
-    operator: str | None = None
-    trace_id: str | None = None
-    idempotency_key: str | None = Field(default=None, max_length=128)
-    priority: int = Field(default=50, ge=0, le=1000)
-    max_attempts: int = Field(default=3, ge=1, le=10)
-    category_id: int = Field(gt=0)
-    title: str = Field(min_length=1, max_length=256)
-    staged_file_id: int = Field(gt=0)
-
-    @field_validator("title", mode="before")
-    @classmethod
-    def normalize_required_title(cls, value: str) -> str:
-        stripped = _strip_or_none(value)
-        if stripped is None:
-            raise ValueError("字段不能为空")
-        return stripped
-
-    @field_validator("idempotency_key", mode="before")
-    @classmethod
-    def normalize_idempotency_key(cls, value: str | None) -> str | None:
-        return _strip_or_none(value)
-
-
 class ImportTaskSubmitUpdateFromStagedInput(BaseModel):
     request_id: str | None = None
     operator: str | None = None

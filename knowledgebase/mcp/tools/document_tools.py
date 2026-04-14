@@ -122,13 +122,13 @@ def register_document_tools(mcp: Any) -> None:
 
     @mcp.tool(
         name="kb_document_import_from_staged",
-        description="标准远端路径：引用 staged_file 导入文档并写入向量索引。",
+        description="标准远端路径：同步引用 staged_file 导入单个文档并写入向量索引。",
     )
     async def kb_document_import_from_staged(
         category_id: int,
         title: str,
         staged_file_id: int,
-        execution_mode: str = "async",
+        execution_mode: str = "sync",
         request_id: str | None = None,
         operator: str | None = None,
         trace_id: str | None = None,
@@ -293,7 +293,20 @@ def _execute_write(payload: dict[str, Any], action: str = "import") -> dict[str,
     """
 
     try:
-        execution_mode = _resolve_execution_mode(payload) if action in {"import_from_staged", "update_from_staged"} else "sync"
+        if action == "import_from_staged":
+            execution_mode = _resolve_execution_mode(
+                payload,
+                default="sync",
+                allow_async=False,
+            )
+        elif action == "update_from_staged":
+            execution_mode = _resolve_execution_mode(
+                payload,
+                default="async",
+                allow_async=True,
+            )
+        else:
+            execution_mode = "sync"
     except AppError as exc:
         return build_error_response(
             code=exc.code,
@@ -304,7 +317,7 @@ def _execute_write(payload: dict[str, Any], action: str = "import") -> dict[str,
             trace_id=payload.get("trace_id"),
         )
 
-    if action in {"import_from_staged", "update_from_staged"} and execution_mode == "async":
+    if action == "update_from_staged" and execution_mode == "async":
         return _execute_async_document_task(payload=payload, action=action)
 
     session = SessionFactory()
@@ -424,9 +437,7 @@ def _execute_async_document_task(*, payload: dict[str, Any], action: str) -> dic
             staged_file_repository=StagedFileRepository(session),
             document_repository=DocumentRepository(session),
         )
-        if action == "import_from_staged":
-            task = service.submit_single_import_task_from_staged(payload)
-        elif action == "update_from_staged":
+        if action == "update_from_staged":
             task = service.submit_update_task_from_staged(payload)
         else:
             raise RuntimeError(f"unsupported async action: {action}")
@@ -491,12 +502,17 @@ def _rollback_write_action(
     return None
 
 
-def _resolve_execution_mode(payload: dict[str, Any]) -> str:
+def _resolve_execution_mode(
+    payload: dict[str, Any],
+    *,
+    default: str,
+    allow_async: bool,
+) -> str:
     """解析并校验文档写入的执行模式。"""
 
     raw_value = payload.get("execution_mode")
     if raw_value is None:
-        return "async"
+        return default
     if not isinstance(raw_value, str):
         raise AppError(
             code="INVALID_ARGUMENT",
@@ -504,8 +520,17 @@ def _resolve_execution_mode(payload: dict[str, Any]) -> str:
             error_type="validation_error",
         )
     value = raw_value.strip().lower()
-    if value in {"", "async"}:
-        return "async"
+    if value == "":
+        return default
+    if value == "async":
+        if allow_async:
+            return "async"
+        raise AppError(
+            code="INVALID_ARGUMENT",
+            message="execution_mode async is not supported for kb_document_import_from_staged",
+            error_type="validation_error",
+            details={"execution_mode": raw_value},
+        )
     if value == "sync":
         return "sync"
     raise AppError(

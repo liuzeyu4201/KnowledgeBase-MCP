@@ -87,10 +87,9 @@
 2. 若分类不存在，调用 `kb_category_create`
 3. `POST /api/staged-files` 上传文件
 4. 调用 `kb_document_import_from_staged`
-5. 默认返回 `task`，轮询 `kb_document_task_get`
-6. 任务成功后调用 `kb_document_get` 或 `kb_document_list` 验证导入结果
-7. 如需强制同步执行，可传 `execution_mode="sync"`
-8. 调用 `kb_search_retrieve` 做召回验证
+5. 同步返回 `document`
+6. 调用 `kb_document_get` 或 `kb_document_list` 验证导入结果
+7. 调用 `kb_search_retrieve` 做召回验证
 
 ### 文档更新
 
