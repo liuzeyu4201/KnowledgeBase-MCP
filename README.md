@@ -34,6 +34,8 @@
 - `kb_document_import_from_staged`
 - `kb_document_update_from_staged`
 - `kb_document_delete`
+- `kb_document_task_get`
+- `kb_document_task_cancel`
 
 ### 暂存文件能力
 
@@ -85,14 +87,17 @@
 2. 若分类不存在，调用 `kb_category_create`
 3. `POST /api/staged-files` 上传文件
 4. 调用 `kb_document_import_from_staged`
-5. 调用 `kb_document_get` 或 `kb_document_list` 验证导入结果
-6. 调用 `kb_search_retrieve` 做召回验证
+5. 同步返回 `document`
+6. 调用 `kb_document_get` 或 `kb_document_list` 验证导入结果
+7. 调用 `kb_search_retrieve` 做召回验证
 
 ### 文档更新
 
 1. 先上传新文件到 `/api/staged-files`
 2. 调用 `kb_document_update_from_staged`
-3. 系统执行整篇重建
+3. 带 `staged_file_id` 的更新默认返回 `task`，轮询 `kb_document_task_get`
+4. 仅元数据更新仍同步返回 `document`
+5. 如需强制同步执行，可传 `execution_mode="sync"`
 
 ### 批量异步导入
 
@@ -216,6 +221,18 @@ cp .env.prod.example .env.prod
 ```bash
 uv sync
 ```
+
+Embedding 配置约定：
+
+- 开发环境样例默认使用主机 Ollama 的 OpenAI 兼容接口：`http://host.docker.internal:11434/v1`
+- 当前开发样例模型：`qwen3-embedding:0.6b`
+- 统一使用 `KNOWLEDGEBASE_EMBEDDING_PROVIDER`
+- 统一使用 `KNOWLEDGEBASE_EMBEDDING_API_KEY`
+- 统一使用 `KNOWLEDGEBASE_EMBEDDING_BASE_URL`
+- 统一使用 `KNOWLEDGEBASE_EMBEDDING_MODEL`
+- 统一使用 `KNOWLEDGEBASE_EMBEDDING_DIMENSION`
+- 服务启动时会校验配置、远端 embedding 可用性，以及现有向量资产与 Milvus 维度是否匹配
+- 当前不再允许 `mock` 作为运行时 embedding provider
 
 语法检查：
 

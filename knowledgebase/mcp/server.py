@@ -8,6 +8,7 @@ from starlette.applications import Starlette
 
 from knowledgebase.app.config import get_settings
 from knowledgebase.db.bootstrap import init_schema
+from knowledgebase.integrations.embedding.validator import validate_embedding_startup
 from knowledgebase.http.staged_file_routes import router as staged_file_router
 from knowledgebase.mcp.tools.category_tools import register_category_tools
 from knowledgebase.mcp.tools.document_tools import register_document_tools
@@ -18,24 +19,29 @@ from knowledgebase.web.middleware import RequestContextMiddleware
 from knowledgebase.web.routes import STATIC_DIR, api_router, page_router, ws_router
 
 settings = get_settings()
-mcp = FastMCP(
-    settings.app_name,
-    host=settings.mcp_host,
-    port=settings.mcp_port,
-    streamable_http_path=settings.mcp_path,
-)
-
-register_category_tools(mcp)
-register_document_tools(mcp)
-register_import_task_tools(mcp)
-register_search_tools(mcp)
-register_staged_file_tools(mcp)
 
 
-def create_http_app() -> Starlette:
+def create_mcp_server() -> FastMCP:
+    """创建一份新的 FastMCP 实例，避免测试场景复用同一个 lifespan 对象。"""
+
+    mcp = FastMCP(
+        settings.app_name,
+        host=settings.mcp_host,
+        port=settings.mcp_port,
+        streamable_http_path=settings.mcp_path,
+    )
+    register_category_tools(mcp)
+    register_document_tools(mcp)
+    register_import_task_tools(mcp)
+    register_search_tools(mcp)
+    register_staged_file_tools(mcp)
+    return mcp
+
+
+def create_http_app(*, mcp_server: FastMCP | None = None) -> Starlette:
     """创建统一 HTTP 应用，复用 FastMCP 内置 lifespan 后再挂接上传子应用。"""
 
-    mcp_app = mcp.streamable_http_app()
+    mcp_app = (mcp_server or create_mcp_server()).streamable_http_app()
     upload_app = FastAPI(title=f"{settings.app_name} Upload API")
     upload_app.add_middleware(RequestContextMiddleware)
 
@@ -61,12 +67,16 @@ def run() -> None:
         # 第一阶段采用自动建表，便于本地开发快速启动。
         init_schema()
 
+    validate_embedding_startup()
+
+    mcp_server = create_mcp_server()
+
     # 容器化部署优先使用 HTTP 传输，本地命令行调试仍可继续使用 stdio。
     if settings.mcp_transport == "stdio":
-        mcp.run()
+        mcp_server.run()
         return
 
-    http_app = create_http_app()
+    http_app = create_http_app(mcp_server=mcp_server)
     uvicorn.run(
         http_app,
         host=settings.mcp_host,

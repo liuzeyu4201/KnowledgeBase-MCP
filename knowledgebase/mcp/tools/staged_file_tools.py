@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 from knowledgebase.db.session import session_scope
 from knowledgebase.domain.exceptions import AppError
@@ -23,7 +24,7 @@ def register_staged_file_tools(mcp: Any) -> None:
         name="kb_staged_file_get",
         description="按主键或 staged_file_uid 查询暂存文件详情，适合确认上传结果和消费状态。",
     )
-    def kb_staged_file_get(
+    async def kb_staged_file_get(
         id: int | None = None,
         staged_file_uid: str | None = None,
         request_id: str | None = None,
@@ -41,13 +42,13 @@ def register_staged_file_tools(mcp: Any) -> None:
             "request_id": request_id,
             "trace_id": trace_id,
         }
-        return _execute_read(payload=payload, action="get")
+        return await run_in_threadpool(_execute_read, payload=payload, action="get")
 
     @mcp.tool(
         name="kb_staged_file_list",
         description="分页查询暂存文件列表，适合遍历未消费、失败或待清理的上传文件。",
     )
-    def kb_staged_file_list(
+    async def kb_staged_file_list(
         status: str | None = None,
         mime_type: str | None = None,
         linked_document_id: int | None = None,
@@ -71,13 +72,13 @@ def register_staged_file_tools(mcp: Any) -> None:
             "request_id": request_id,
             "trace_id": trace_id,
         }
-        return _execute_read(payload=payload, action="list")
+        return await run_in_threadpool(_execute_read, payload=payload, action="list")
 
     @mcp.tool(
         name="kb_staged_file_delete",
         description="删除未消费或已过期的暂存文件。已消费文件默认不允许删除。",
     )
-    def kb_staged_file_delete(
+    async def kb_staged_file_delete(
         id: int | None = None,
         staged_file_uid: str | None = None,
         request_id: str | None = None,
@@ -97,7 +98,7 @@ def register_staged_file_tools(mcp: Any) -> None:
             "operator": operator,
             "trace_id": trace_id,
         }
-        return _execute_write(payload=payload)
+        return await run_in_threadpool(_execute_write, payload=payload)
 
 
 def _execute_read(*, payload: dict[str, Any], action: str) -> dict[str, Any]:

@@ -4,10 +4,12 @@ from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 from knowledgebase.db.session import session_scope
 from knowledgebase.domain.exceptions import AppError
 from knowledgebase.repositories.category_repository import CategoryRepository
+from knowledgebase.repositories.document_repository import DocumentRepository
 from knowledgebase.repositories.import_task_repository import ImportTaskRepository
 from knowledgebase.repositories.staged_file_repository import StagedFileRepository
 from knowledgebase.schemas.common import build_error_response, build_success_response
@@ -15,17 +17,17 @@ from knowledgebase.services.import_task_service import ImportTaskService
 
 
 def register_import_task_tools(mcp: Any) -> None:
-    """注册批量文档导入任务相关 MCP Tool。
+    """注册文档异步任务相关 MCP Tool。
 
-    这些 Tool 面向需要异步导入、批量导入和后台任务编排的 Agent。
-    标准远端路径统一使用 `*_from_staged` 版本，避免在 MCP 参数里携带大文件内容。
+    这些 Tool 面向需要异步导入、异步更新和后台任务编排的 Agent。
+    历史上的 `import_batch_*` 命名继续保留，新的通用文档任务入口同步提供。
     """
 
     @mcp.tool(
         name="kb_document_import_batch_submit_from_staged",
         description="标准远端路径：基于 staged_file 引用提交批量文档导入异步任务。",
     )
-    def kb_document_import_batch_submit_from_staged(
+    async def kb_document_import_batch_submit_from_staged(
         items: list[dict[str, Any]],
         priority: int = 50,
         max_attempts: int = 3,
@@ -50,13 +52,13 @@ def register_import_task_tools(mcp: Any) -> None:
             "operator": operator,
             "trace_id": trace_id,
         }
-        return _execute_write(payload=payload, action="submit_from_staged")
+        return await run_in_threadpool(_execute_write, payload=payload, action="submit_from_staged")
 
     @mcp.tool(
         name="kb_document_import_batch_cancel",
         description="取消批量文档导入异步任务。支持 queued 直接取消，也支持 running 协作式取消。",
     )
-    def kb_document_import_batch_cancel(
+    async def kb_document_import_batch_cancel(
         id: int | None = None,
         task_uid: str | None = None,
         request_id: str | None = None,
@@ -77,13 +79,33 @@ def register_import_task_tools(mcp: Any) -> None:
             "operator": operator,
             "trace_id": trace_id,
         }
-        return _execute_write(payload=payload, action="cancel")
+        return await run_in_threadpool(_execute_write, payload=payload, action="cancel")
+
+    @mcp.tool(
+        name="kb_document_task_cancel",
+        description="取消文档异步任务。兼容单文档更新和批量导入任务。",
+    )
+    async def kb_document_task_cancel(
+        id: int | None = None,
+        task_uid: str | None = None,
+        request_id: str | None = None,
+        operator: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        payload = {
+            "id": id,
+            "task_uid": task_uid,
+            "request_id": request_id,
+            "operator": operator,
+            "trace_id": trace_id,
+        }
+        return await run_in_threadpool(_execute_write, payload=payload, action="cancel")
 
     @mcp.tool(
         name="kb_document_import_batch_get",
         description="查询批量文档导入异步任务状态。可选择是否返回子项明细。",
     )
-    def kb_document_import_batch_get(
+    async def kb_document_import_batch_get(
         id: int | None = None,
         task_uid: str | None = None,
         include_items: bool = True,
@@ -104,7 +126,27 @@ def register_import_task_tools(mcp: Any) -> None:
             "request_id": request_id,
             "trace_id": trace_id,
         }
-        return _execute_read(payload=payload)
+        return await run_in_threadpool(_execute_read, payload=payload)
+
+    @mcp.tool(
+        name="kb_document_task_get",
+        description="查询文档异步任务状态。兼容单文档更新和批量导入任务。",
+    )
+    async def kb_document_task_get(
+        id: int | None = None,
+        task_uid: str | None = None,
+        include_items: bool = True,
+        request_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        payload = {
+            "id": id,
+            "task_uid": task_uid,
+            "include_items": include_items,
+            "request_id": request_id,
+            "trace_id": trace_id,
+        }
+        return await run_in_threadpool(_execute_read, payload=payload)
 
 
 def _execute_write(*, payload: dict[str, Any], action: str) -> dict[str, Any]:
@@ -121,6 +163,7 @@ def _execute_write(*, payload: dict[str, Any], action: str) -> dict[str, Any]:
                 ImportTaskRepository(session),
                 category_repository=CategoryRepository(session),
                 staged_file_repository=StagedFileRepository(session),
+                document_repository=DocumentRepository(session),
             )
             if action == "submit_from_staged":
                 task = service.submit_task_from_staged(payload)
@@ -177,6 +220,7 @@ def _execute_read(*, payload: dict[str, Any]) -> dict[str, Any]:
                 ImportTaskRepository(session),
                 category_repository=CategoryRepository(session),
                 staged_file_repository=StagedFileRepository(session),
+                document_repository=DocumentRepository(session),
             )
             task = service.get_task(payload)
             return build_success_response(

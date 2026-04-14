@@ -4,15 +4,18 @@ from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 from knowledgebase.db.session import SessionFactory
 from knowledgebase.domain.exceptions import AppError
 from knowledgebase.repositories.category_repository import CategoryRepository
 from knowledgebase.repositories.chunk_repository import ChunkRepository
 from knowledgebase.repositories.document_repository import DocumentRepository
+from knowledgebase.repositories.import_task_repository import ImportTaskRepository
 from knowledgebase.repositories.staged_file_repository import StagedFileRepository
 from knowledgebase.schemas.common import build_error_response, build_success_response
 from knowledgebase.services.document_service import DocumentService
+from knowledgebase.services.import_task_service import ImportTaskService
 
 
 def register_document_tools(mcp: Any) -> None:
@@ -28,7 +31,7 @@ def register_document_tools(mcp: Any) -> None:
         name="kb_document_get",
         description="按主键或 document_uid 查询文档详情，返回文档元数据、状态和分类信息。",
     )
-    def kb_document_get(
+    async def kb_document_get(
         id: int | None = None,
         document_uid: str | None = None,
         request_id: str | None = None,
@@ -47,13 +50,13 @@ def register_document_tools(mcp: Any) -> None:
             "request_id": request_id,
             "trace_id": trace_id,
         }
-        return _execute_read(payload=payload, action="get")
+        return await run_in_threadpool(_execute_read, payload=payload, action="get")
 
     @mcp.tool(
         name="kb_document_list",
         description="分页查询文档列表，支持按分类、标题、文件名和处理状态过滤。",
     )
-    def kb_document_list(
+    async def kb_document_list(
         category_id: int | None = None,
         title: str | None = None,
         file_name: str | None = None,
@@ -82,13 +85,13 @@ def register_document_tools(mcp: Any) -> None:
             "request_id": request_id,
             "trace_id": trace_id,
         }
-        return _execute_read(payload=payload, action="list")
+        return await run_in_threadpool(_execute_read, payload=payload, action="list")
 
     @mcp.tool(
         name="kb_document_content_get",
         description="读取单个文档的原文视图和 chunk 原文，适合网页或 Agent 查看文档内容细节。",
     )
-    def kb_document_content_get(
+    async def kb_document_content_get(
         id: int | None = None,
         document_uid: str | None = None,
         source_page: int = 1,
@@ -115,16 +118,17 @@ def register_document_tools(mcp: Any) -> None:
             "request_id": request_id,
             "trace_id": trace_id,
         }
-        return _execute_read(payload=payload, action="content_get")
+        return await run_in_threadpool(_execute_read, payload=payload, action="content_get")
 
     @mcp.tool(
         name="kb_document_import_from_staged",
-        description="标准远端路径：引用 staged_file 导入文档并写入向量索引。",
+        description="标准远端路径：同步引用 staged_file 导入单个文档并写入向量索引。",
     )
-    def kb_document_import_from_staged(
+    async def kb_document_import_from_staged(
         category_id: int,
         title: str,
         staged_file_id: int,
+        execution_mode: str = "sync",
         request_id: str | None = None,
         operator: str | None = None,
         trace_id: str | None = None,
@@ -141,17 +145,18 @@ def register_document_tools(mcp: Any) -> None:
             "category_id": category_id,
             "title": title,
             "staged_file_id": staged_file_id,
+            "execution_mode": execution_mode,
             "request_id": request_id,
             "operator": operator,
             "trace_id": trace_id,
         }
-        return _execute_write(payload, action="import_from_staged")
+        return await run_in_threadpool(_execute_write, payload, "import_from_staged")
 
     @mcp.tool(
         name="kb_document_delete",
         description="按主键或 document_uid 删除文档，并级联清理切片、向量和源文件。",
     )
-    def kb_document_delete(
+    async def kb_document_delete(
         id: int | None = None,
         document_uid: str | None = None,
         request_id: str | None = None,
@@ -172,18 +177,19 @@ def register_document_tools(mcp: Any) -> None:
             "operator": operator,
             "trace_id": trace_id,
         }
-        return _execute_write(payload, action="delete")
+        return await run_in_threadpool(_execute_write, payload, "delete")
 
     @mcp.tool(
         name="kb_document_update_from_staged",
         description="标准远端路径：使用 staged_file 整篇替换文档并重建切片与向量。",
     )
-    def kb_document_update_from_staged(
+    async def kb_document_update_from_staged(
         id: int | None = None,
         document_uid: str | None = None,
         category_id: int | None = None,
         title: str | None = None,
         staged_file_id: int | None = None,
+        execution_mode: str = "async",
         request_id: str | None = None,
         operator: str | None = None,
         trace_id: str | None = None,
@@ -201,11 +207,12 @@ def register_document_tools(mcp: Any) -> None:
             "category_id": category_id,
             "title": title,
             "staged_file_id": staged_file_id,
+            "execution_mode": execution_mode,
             "request_id": request_id,
             "operator": operator,
             "trace_id": trace_id,
         }
-        return _execute_write(payload, action="update_from_staged")
+        return await run_in_threadpool(_execute_write, payload, "update_from_staged")
 
 
 def _execute_read(*, payload: dict[str, Any], action: str) -> dict[str, Any]:
@@ -284,6 +291,34 @@ def _execute_write(payload: dict[str, Any], action: str = "import") -> dict[str,
     写入类 Tool 会在成功提交数据库后，再执行必要的文件清理动作。
     Agent 可以把统一响应中的 `success/code/data` 当作稳定协议使用。
     """
+
+    try:
+        if action == "import_from_staged":
+            execution_mode = _resolve_execution_mode(
+                payload,
+                default="sync",
+                allow_async=False,
+            )
+        elif action == "update_from_staged":
+            execution_mode = _resolve_execution_mode(
+                payload,
+                default="async",
+                allow_async=True,
+            )
+        else:
+            execution_mode = "sync"
+    except AppError as exc:
+        return build_error_response(
+            code=exc.code,
+            message=exc.message,
+            error_type=exc.error_type,
+            details=exc.details,
+            request_id=payload.get("request_id"),
+            trace_id=payload.get("trace_id"),
+        )
+
+    if action == "update_from_staged" and execution_mode == "async":
+        return _execute_async_document_task(payload=payload, action=action)
 
     session = SessionFactory()
     service = DocumentService(
@@ -388,6 +423,64 @@ def _execute_write(payload: dict[str, Any], action: str = "import") -> dict[str,
     )
 
 
+def _execute_async_document_task(*, payload: dict[str, Any], action: str) -> dict[str, Any]:
+    """提交单文档异步任务并立即返回任务信息。"""
+
+    if action == "update_from_staged" and payload.get("staged_file_id") is None:
+        return _execute_write({**payload, "execution_mode": "sync"}, action)
+
+    session = SessionFactory()
+    try:
+        service = ImportTaskService(
+            ImportTaskRepository(session),
+            category_repository=CategoryRepository(session),
+            staged_file_repository=StagedFileRepository(session),
+            document_repository=DocumentRepository(session),
+        )
+        if action == "update_from_staged":
+            task = service.submit_update_task_from_staged(payload)
+        else:
+            raise RuntimeError(f"unsupported async action: {action}")
+        session.commit()
+        return build_success_response(
+            data={"task": task.model_dump(mode="json")},
+            request_id=payload.get("request_id"),
+            trace_id=payload.get("trace_id"),
+        )
+    except AppError as exc:
+        session.rollback()
+        return build_error_response(
+            code=exc.code,
+            message=exc.message,
+            error_type=exc.error_type,
+            details=exc.details,
+            request_id=payload.get("request_id"),
+            trace_id=payload.get("trace_id"),
+        )
+    except (ValidationError, SQLAlchemyError) as exc:
+        session.rollback()
+        return build_error_response(
+            code="DB_ERROR" if isinstance(exc, SQLAlchemyError) else "INVALID_ARGUMENT",
+            message="database operation failed" if isinstance(exc, SQLAlchemyError) else "invalid request",
+            error_type="system_error" if isinstance(exc, SQLAlchemyError) else "validation_error",
+            details={"error": str(exc)},
+            request_id=payload.get("request_id"),
+            trace_id=payload.get("trace_id"),
+        )
+    except Exception as exc:
+        session.rollback()
+        return build_error_response(
+            code="INTERNAL_ERROR",
+            message="internal server error",
+            error_type="system_error",
+            details={"error": str(exc)},
+            request_id=payload.get("request_id"),
+            trace_id=payload.get("trace_id"),
+        )
+    finally:
+        session.close()
+
+
 def _rollback_write_action(
     *,
     service: DocumentService,
@@ -407,3 +500,42 @@ def _rollback_write_action(
     if action == "update_from_staged":
         return service.rollback_update_side_effects(original_error=error)
     return None
+
+
+def _resolve_execution_mode(
+    payload: dict[str, Any],
+    *,
+    default: str,
+    allow_async: bool,
+) -> str:
+    """解析并校验文档写入的执行模式。"""
+
+    raw_value = payload.get("execution_mode")
+    if raw_value is None:
+        return default
+    if not isinstance(raw_value, str):
+        raise AppError(
+            code="INVALID_ARGUMENT",
+            message="execution_mode must be a string",
+            error_type="validation_error",
+        )
+    value = raw_value.strip().lower()
+    if value == "":
+        return default
+    if value == "async":
+        if allow_async:
+            return "async"
+        raise AppError(
+            code="INVALID_ARGUMENT",
+            message="execution_mode async is not supported for kb_document_import_from_staged",
+            error_type="validation_error",
+            details={"execution_mode": raw_value},
+        )
+    if value == "sync":
+        return "sync"
+    raise AppError(
+        code="INVALID_ARGUMENT",
+        message="execution_mode must be async or sync",
+        error_type="validation_error",
+        details={"execution_mode": raw_value},
+    )

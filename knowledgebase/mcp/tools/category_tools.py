@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 from knowledgebase.db.session import session_scope
 from knowledgebase.domain.exceptions import AppError
@@ -23,7 +24,7 @@ def register_category_tools(mcp: Any) -> None:
         name="kb_category_create",
         description="新增知识分类。适合在导入文档前先创建业务分类，返回 category 详情。",
     )
-    def kb_category_create(
+    async def kb_category_create(
         category_code: str,
         name: str,
         description: str | None = None,
@@ -49,13 +50,13 @@ def register_category_tools(mcp: Any) -> None:
             "operator": operator,
             "trace_id": trace_id,
         }
-        return _execute_write(payload=payload, action="create")
+        return await run_in_threadpool(_execute_write, payload=payload, action="create")
 
     @mcp.tool(
         name="kb_category_get",
         description="按主键或分类编码查询分类详情。适合在导入、更新、删除前确认分类是否存在。",
     )
-    def kb_category_get(
+    async def kb_category_get(
         id: int | None = None,
         category_code: str | None = None,
         request_id: str | None = None,
@@ -74,13 +75,13 @@ def register_category_tools(mcp: Any) -> None:
             "request_id": request_id,
             "trace_id": trace_id,
         }
-        return _execute_read(payload=payload, action="get")
+        return await run_in_threadpool(_execute_read, payload=payload, action="get")
 
     @mcp.tool(
         name="kb_category_update",
         description="更新知识分类。支持改编码、名称、描述和状态，返回更新后的 category。",
     )
-    def kb_category_update(
+    async def kb_category_update(
         id: int | None = None,
         category_code: str | None = None,
         new_category_code: str | None = None,
@@ -110,13 +111,13 @@ def register_category_tools(mcp: Any) -> None:
             "operator": operator,
             "trace_id": trace_id,
         }
-        return _execute_write(payload=payload, action="update")
+        return await run_in_threadpool(_execute_write, payload=payload, action="update")
 
     @mcp.tool(
         name="kb_category_delete",
         description="删除知识分类。当前为软删除；若分类下仍有文档会拒绝删除。",
     )
-    def kb_category_delete(
+    async def kb_category_delete(
         id: int | None = None,
         category_code: str | None = None,
         request_id: str | None = None,
@@ -137,13 +138,13 @@ def register_category_tools(mcp: Any) -> None:
             "operator": operator,
             "trace_id": trace_id,
         }
-        return _execute_write(payload=payload, action="delete")
+        return await run_in_threadpool(_execute_write, payload=payload, action="delete")
 
     @mcp.tool(
         name="kb_category_list",
         description="分页查询分类列表。适合给 Agent 做分类选择、遍历和管理。",
     )
-    def kb_category_list(
+    async def kb_category_list(
         category_code: str | None = None,
         name: str | None = None,
         status: int | None = None,
@@ -168,7 +169,7 @@ def register_category_tools(mcp: Any) -> None:
             "request_id": request_id,
             "trace_id": trace_id,
         }
-        return _execute_read(payload=payload, action="list")
+        return await run_in_threadpool(_execute_read, payload=payload, action="list")
 
 
 def _execute_write(*, payload: dict[str, Any], action: str) -> dict[str, Any]:

@@ -7,6 +7,7 @@ from knowledgebase.app.config import get_settings
 from knowledgebase.db.bootstrap import init_schema
 from knowledgebase.db.session import session_scope
 from knowledgebase.domain.exceptions import AppError
+from knowledgebase.integrations.embedding.validator import validate_embedding_startup
 from knowledgebase.integrations.storage.file_storage import FileStorage
 from knowledgebase.repositories.category_repository import CategoryRepository
 from knowledgebase.repositories.chunk_repository import ChunkRepository
@@ -19,7 +20,7 @@ from knowledgebase.services.document_service import DocumentService
 
 
 class ImportTaskWorker:
-    """批量文档导入后台 worker。"""
+    """文档异步任务后台 worker。"""
 
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -27,10 +28,12 @@ class ImportTaskWorker:
         self.storage = FileStorage()
 
     def run_forever(self) -> None:
-        """持续轮询 PostgreSQL 任务表并执行批量导入任务。"""
+        """持续轮询 PostgreSQL 任务表并执行文档异步任务。"""
 
         if self.settings.auto_init_schema:
             init_schema()
+
+        validate_embedding_startup()
 
         while True:
             expired_claimed = 0
@@ -125,7 +128,7 @@ class ImportTaskWorker:
             }
 
     def _process_task(self, *, task_id: int, lease_token: str) -> None:
-        """串行处理单个批量任务下的全部文档导入子项。"""
+        """串行处理单个任务下的全部文档子项。"""
 
         while True:
             task = self._prepare_task_cycle(task_id=task_id, lease_token=lease_token)
@@ -186,9 +189,10 @@ class ImportTaskWorker:
             return {"id": item.id}
 
     def _process_item(self, *, task_id: int, item_id: int, lease_token: str) -> None:
-        """执行单个文档导入子项，并维护任务状态与重试逻辑。"""
+        """执行单个文档子项，并维护任务状态与重试逻辑。"""
 
         document_service: DocumentService | None = None
+        task_type: str | None = None
         with session_scope() as session:
             task_repository = ImportTaskRepository(session)
             item = task_repository.get_item_for_execution(
@@ -199,6 +203,7 @@ class ImportTaskWorker:
             task = task_repository.get_by_id(task_id)
             if item is None or task is None:
                 return
+            task_type = task.task_type
 
             document_service = DocumentService(
                 category_repository=CategoryRepository(session),
@@ -208,20 +213,13 @@ class ImportTaskWorker:
             )
 
             try:
-                result = document_service.import_document_from_staged(
-                    {
-                        "category_id": item.category_id,
-                        "title": item.title,
-                        "staged_file_id": item.staged_file_id,
-                        "request_id": task.request_id,
-                        "operator": task.operator,
-                        "trace_id": task.trace_id,
-                    },
-                    cancellation_checker=self._build_cancellation_checker(
-                        task_id=task_id,
-                        item_id=item_id,
-                        lease_token=lease_token,
-                    ),
+                result = self._execute_document_task_item(
+                    document_service=document_service,
+                    task=task,
+                    item=item,
+                    task_id=task_id,
+                    item_id=item_id,
+                    lease_token=lease_token,
                 )
                 task_repository.mark_item_success(
                     item=item,
@@ -251,7 +249,58 @@ class ImportTaskWorker:
 
             task_repository.refresh_task_aggregate(task)
         if document_service is not None:
+            if task_type == "document_update_batch":
+                document_service.finalize_update_context()
             document_service.finalize_post_commit_cleanup()
+
+    def _execute_document_task_item(
+        self,
+        *,
+        document_service: DocumentService,
+        task,
+        item,
+        task_id: int,
+        item_id: int,
+        lease_token: str,
+    ) -> dict:
+        """按任务类型执行单个文档子项。"""
+
+        if task.task_type == "document_import_batch":
+            return document_service.import_document_from_staged(
+                {
+                    "category_id": item.category_id,
+                    "title": item.title,
+                    "staged_file_id": item.staged_file_id,
+                    "request_id": task.request_id,
+                    "operator": task.operator,
+                    "trace_id": task.trace_id,
+                },
+                cancellation_checker=self._build_cancellation_checker(
+                    task_id=task_id,
+                    item_id=item_id,
+                    lease_token=lease_token,
+                ),
+            )
+
+        if task.task_type == "document_update_batch":
+            return document_service.update_document_from_staged(
+                {
+                    "id": item.document_id,
+                    "category_id": item.category_id,
+                    "title": item.title,
+                    "staged_file_id": item.staged_file_id,
+                    "request_id": task.request_id,
+                    "operator": task.operator,
+                    "trace_id": task.trace_id,
+                }
+            )
+
+        raise AppError(
+            code="TASK_TYPE_UNSUPPORTED",
+            message="unsupported document task type",
+            error_type="system_error",
+            details={"task_type": task.task_type},
+        )
 
     def _handle_item_error(
         self,

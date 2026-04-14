@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 from knowledgebase.db.session import session_scope
 from knowledgebase.domain.exceptions import AppError
@@ -23,7 +24,7 @@ def register_search_tools(mcp: Any) -> None:
         name="kb_search_retrieve",
         description="执行知识库检索，支持语义检索、BM25 检索和混合检索，并返回结构化 chunk 命中结果。",
     )
-    def kb_search_retrieve(
+    async def kb_search_retrieve(
         query: str,
         alpha: float = 0.0,
         limit: int = 10,
@@ -52,7 +53,7 @@ def register_search_tools(mcp: Any) -> None:
             "operator": operator,
             "trace_id": trace_id,
         }
-        return _execute_search(payload)
+        return await run_in_threadpool(_execute_search, payload)
 
 
 def _execute_search(payload: dict[str, Any]) -> dict[str, Any]:

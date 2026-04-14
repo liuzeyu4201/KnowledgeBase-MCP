@@ -931,9 +931,13 @@ class ImportTaskContractTestCase(MCPIntegrationTestCase):
                 items = get_payload["data"]["task"]["items"]
                 self.assertEqual(len(items), 3)
                 for item in items:
-                    self.assertEqual(item["status"], "pending")
-                    self.assertEqual(item["attempt_count"], 0)
-                    self.assertIsNone(item["started_at"])
+                    self.assertIn(item["status"], {"pending", "running"})
+                    if item["status"] == "pending":
+                        self.assertEqual(item["attempt_count"], 0)
+                        self.assertIsNone(item["started_at"])
+                    else:
+                        self.assertGreaterEqual(item["attempt_count"], 1)
+                        self.assertIsNotNone(item["started_at"])
                     self.assertIsNone(item["finished_at"])
                     self.assertIsNone(item["last_error"])
             finally:

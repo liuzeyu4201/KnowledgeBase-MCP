@@ -1,10 +1,10 @@
 # 测试文档
 
-- 生成时间: 2026-04-11T06:23:15.242459
+- 生成时间: 2026-04-12T14:27:29.951119
 - Python: 3.13.13
 - 平台: Linux-6.12.76-linuxkit-aarch64-with-glibc2.41
-- 执行用例总数: 136
-- 通过: 136
+- 执行用例总数: 148
+- 通过: 148
 - 失败: 0
 - 错误: 0
 - 跳过: 0
@@ -12,6 +12,7 @@
 ## 执行摘要
 
 ```text
+test_category_can_recreate_same_code_and_name_after_soft_delete (test_category_contract.CategoryContractTestCase.test_category_can_recreate_same_code_and_name_after_soft_delete) ... ok
 test_category_create_rejects_duplicate_code (test_category_contract.CategoryContractTestCase.test_category_create_rejects_duplicate_code) ... ok
 test_category_create_rejects_invalid_code (test_category_contract.CategoryContractTestCase.test_category_create_rejects_invalid_code) ... ok
 test_category_crud_smoke (test_category_contract.CategoryContractTestCase.test_category_crud_smoke) ... ok
@@ -30,6 +31,12 @@ test_document_import_rejects_invalid_category (test_document_contract.DocumentCo
 test_document_update_metadata_only (test_document_contract.DocumentContractTestCase.test_document_update_metadata_only) ... ok
 test_document_update_replace_markdown_with_docx (test_document_contract.DocumentContractTestCase.test_document_update_replace_markdown_with_docx) ... ok
 test_document_upload_rejects_invalid_mime_type (test_document_contract.DocumentContractTestCase.test_document_upload_rejects_invalid_mime_type) ... ok
+test_build_embedder_supports_ollama_without_api_key (test_embedding_startup_validation.EmbeddingStartupValidationTestCase.test_build_embedder_supports_ollama_without_api_key) ... ok
+test_build_embedder_uses_unified_embedding_env_vars (test_embedding_startup_validation.EmbeddingStartupValidationTestCase.test_build_embedder_uses_unified_embedding_env_vars) ... ok
+test_validator_logs_successful_startup_validation (test_embedding_startup_validation.EmbeddingStartupValidationTestCase.test_validator_logs_successful_startup_validation) ... ok
+test_validator_rejects_mock_provider (test_embedding_startup_validation.EmbeddingStartupValidationTestCase.test_validator_rejects_mock_provider) ... ok
+test_validator_rejects_persisted_asset_mismatch (test_embedding_startup_validation.EmbeddingStartupValidationTestCase.test_validator_rejects_persisted_asset_mismatch) ... ok
+test_validator_rejects_probe_dimension_mismatch (test_embedding_startup_validation.EmbeddingStartupValidationTestCase.test_validator_rejects_probe_dimension_mismatch) ... ok
 test_cancel_queued_task_cleans_staged_files (test_import_task_consistency.ImportTaskConsistencyTestCase.test_cancel_queued_task_cleans_staged_files)
 一致性：取消 queued 任务后，暂存文件应被清理。 ... ok
 test_cancel_running_task_does_not_corrupt_other_items (test_import_task_consistency.ImportTaskConsistencyTestCase.test_cancel_running_task_does_not_corrupt_other_items)
@@ -222,14 +229,19 @@ test_rapid_repeated_get_same_task (test_import_task_production_edge_cases.Produc
 快速连续：同一任务重复查询多次。 ... ok
 test_rapid_submit_cancel_submit_sequence (test_import_task_production_edge_cases.ProductionEdgeCaseTestCase.test_rapid_submit_cancel_submit_sequence)
 快速连续：submit -> cancel -> submit 序列。 ... ok
+test_cancel_running_task_returns_cancel_requested_immediately (test_import_task_service_unit.ImportTaskServiceUnitTestCase.test_cancel_running_task_returns_cancel_requested_immediately) ... ok
+test_slow_document_import_does_not_block_healthz (test_non_blocking_io_contract.NonBlockingIOContractTestCase.test_slow_document_import_does_not_block_healthz) ... ok
+test_slow_staged_upload_does_not_block_healthz (test_non_blocking_io_contract.NonBlockingIOContractTestCase.test_slow_staged_upload_does_not_block_healthz) ... ok
 test_bm25_exact_theorem_query_hits_expected_chunk (test_search_contract.SearchContractTestCase.test_bm25_exact_theorem_query_hits_expected_chunk) ... ok
 test_bm25_natural_question_should_return_hilbert_definition_in_top3 (test_search_contract.SearchContractTestCase.test_bm25_natural_question_should_return_hilbert_definition_in_top3) ... ok
 test_hybrid_search_chinese_query_should_hit_hilbert_section_in_top3 (test_search_contract.SearchContractTestCase.test_hybrid_search_chinese_query_should_hit_hilbert_section_in_top3) ... ok
 test_search_rejects_empty_query (test_search_contract.SearchContractTestCase.test_search_rejects_empty_query) ... ok
 test_search_rejects_invalid_alpha (test_search_contract.SearchContractTestCase.test_search_rejects_invalid_alpha) ... ok
 test_batch_submit_from_staged_smoke (test_staged_file_contract.StagedFileContractTestCase.test_batch_submit_from_staged_smoke) ... ok
+test_consuming_staged_file_is_not_cleaned_by_expired_sweep (test_staged_file_contract.StagedFileContractTestCase.test_consuming_staged_file_is_not_cleaned_by_expired_sweep) ... ok
 test_document_import_from_staged_smoke (test_staged_file_contract.StagedFileContractTestCase.test_document_import_from_staged_smoke) ... ok
 test_document_update_from_staged_rebuilds_document (test_staged_file_contract.StagedFileContractTestCase.test_document_update_from_staged_rebuilds_document) ... ok
+test_expired_uploaded_staged_file_is_cleaned (test_staged_file_contract.StagedFileContractTestCase.test_expired_uploaded_staged_file_is_cleaned) ... ok
 test_staged_file_delete_rejects_consumed_file (test_staged_file_contract.StagedFileContractTestCase.test_staged_file_delete_rejects_consumed_file) ... ok
 test_staged_file_http_upload_and_mcp_manage_smoke (test_staged_file_contract.StagedFileContractTestCase.test_staged_file_http_upload_and_mcp_manage_smoke) ... ok
 test_staged_file_upload_rejects_invalid_mime (test_staged_file_contract.StagedFileContractTestCase.test_staged_file_upload_rejects_invalid_mime) ... ok
@@ -246,7 +258,7 @@ test_visual_document_delete_api (test_web_visualization_contract.WebVisualizatio
 test_task_websocket_pushes_terminal_state (test_web_visualization_contract.WebVisualizationWebSocketTestCase.test_task_websocket_pushes_terminal_state) ... ok
 
 ----------------------------------------------------------------------
-Ran 136 tests in 596.671s
+Ran 148 tests in 938.242s
 
 OK
 ```

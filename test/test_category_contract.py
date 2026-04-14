@@ -72,6 +72,37 @@ class CategoryContractTestCase(MCPIntegrationTestCase):
 
         self.run_async(scenario())
 
+    def test_category_can_recreate_same_code_and_name_after_soft_delete(self) -> None:
+        async def scenario() -> None:
+            category = await self.create_category(prefix="category_recreate")
+
+            delete_payload = await self.tool("kb_category_delete", id=category["id"])
+            self.assert_success(delete_payload)
+
+            recreate_payload = await self.tool(
+                "kb_category_create",
+                category_code=category["category_code"],
+                name=category["name"],
+                description="软删除后重建分类",
+            )
+            self.assert_success(recreate_payload)
+
+            recreated = recreate_payload["data"]["category"]
+            self.assertNotEqual(recreated["id"], category["id"])
+
+            try:
+                get_payload = await self.tool("kb_category_get", id=recreated["id"])
+                self.assert_success(get_payload)
+                self.assertEqual(
+                    get_payload["data"]["category"]["category_code"],
+                    category["category_code"],
+                )
+                self.assertEqual(get_payload["data"]["category"]["name"], category["name"])
+            finally:
+                await self.delete_category_best_effort(recreated)
+
+        self.run_async(scenario())
+
     def test_category_get_requires_identifier(self) -> None:
         async def scenario() -> None:
             payload = await self.tool("kb_category_get")
