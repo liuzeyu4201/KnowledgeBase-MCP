@@ -12,7 +12,7 @@ wheels/
 # Environment files
 .env
 .env.dev
-.env.prod
+env/.env.dev
 
 # Docs
 @docs/

@@ -1,404 +1,113 @@
-# KnowledgeBase MCP Server
+# KnowledgeBase
 
-面向知识库场景的 MCP Server。当前实现基于 `Python + uv + PostgreSQL + Milvus`，用于给上层 Agent 提供稳定的知识库管理与检索能力。
+这个项目提供一套可直接给 Agent 调用的知识库，主要功能：
+- 管理知识库分类与文档
+- 将文件导入为可检索内容
+- 通过向量检索与关键词检索返回结果
+
+当前项目同时提供：
+
+- MCP 交互入口
+- 文件上传入口
+- 可视化网页界面
+- 项目内置的知识库使用 Skill
 
 许可证：`Apache-2.0`，见 [LICENSE](LICENSE)。
 
-## 项目定位
+## 1. 项目简介
+
+KnowledgeBase 适合这样的使用方式：
+
+- 让 Claude Code 或其他 Agent 通过 MCP 直接操作知识库
+- 先上传文件，再通过 MCP 导入到知识库
+- 在网页中查看分类、文档、导入任务和内容
+
+当前主要能力包括：
+
+- 分类管理：创建、查询、更新、删除分类
+- 文档管理：导入、查询、更新、删除文档
+- 暂存文件：上传文件后再导入
+- 批量导入：批量提交、查询、取消任务
+- 检索能力：向量检索、BM25 检索、混合检索
+- 可视化界面：通过浏览器查看知识库内容
+
+## 2. 安装
+
+这一节只关注实际使用需要的命令：配置 API、启动服务、配置 MCP、查看 Skill。
 
 
-当前实现目标：
 
-- 提供可被 Agent 调用的 MCP Tool
-- 提供远端可用的大文件上传与导入链路
-- 用 PostgreSQL 维护业务主数据
-- 用 Milvus 提供语义检索、BM25 检索和混合检索
-- 支持同步文档操作和异步批量导入任务
-
----
-
-## 当前能力
-
-### 分类能力
-
-- `kb_category_create`
-- `kb_category_get`
-- `kb_category_list`
-- `kb_category_update`
-- `kb_category_delete`
-
-### 文档能力
-
-- `kb_document_get`
-- `kb_document_list`
-- `kb_document_import_from_staged`
-- `kb_document_update_from_staged`
-- `kb_document_delete`
-- `kb_document_task_get`
-- `kb_document_task_cancel`
-
-### 暂存文件能力
-
-- `POST /api/staged-files`
-- `GET /api/staged-files/{staged_file_id}`
-- `GET /api/staged-files`
-- `DELETE /api/staged-files/{staged_file_id}`
-- `kb_staged_file_get`
-- `kb_staged_file_list`
-- `kb_staged_file_delete`
-
-### 批量异步任务能力
-
-- `kb_document_import_batch_submit_from_staged`
-- `kb_document_import_batch_get`
-- `kb_document_import_batch_cancel`
-
-### 检索能力
-
-- `kb_search_retrieve`
-
-当前支持文档类型：
-
-- `application/pdf`
-- `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
-- `text/markdown`
-
-### 可视化网页能力
-
-- `GET /` 或 `GET /ui`：知识库分类首页
-- `GET /ui/categories/{category_id}`：分类文档列表页
-- `GET /api/visualization/categories`
-- `GET /api/visualization/categories/{category_id}/documents`
-- `GET /api/visualization/import-tasks/{task_id}`
-- `GET /ws/import-tasks/{task_id}`
-
----
-
-## 标准导入流程
-
-远端部署下，标准流程不是把文件内容直接塞进 MCP Tool，而是两段式：
-
-1. 通过 HTTP 上传接口把文件上传到暂存区
-2. 通过 `*_from_staged` 的 MCP Tool 完成导入或更新
-
-### 单文档导入
-
-1. `kb_category_get` 或 `kb_category_list` 找到目标分类
-2. 若分类不存在，调用 `kb_category_create`
-3. `POST /api/staged-files` 上传文件
-4. 调用 `kb_document_import_from_staged`
-5. 同步返回 `document`
-6. 调用 `kb_document_get` 或 `kb_document_list` 验证导入结果
-7. 调用 `kb_search_retrieve` 做召回验证
-
-### 文档更新
-
-1. 先上传新文件到 `/api/staged-files`
-2. 调用 `kb_document_update_from_staged`
-3. 带 `staged_file_id` 的更新默认返回 `task`，轮询 `kb_document_task_get`
-4. 仅元数据更新仍同步返回 `document`
-5. 如需强制同步执行，可传 `execution_mode="sync"`
-
-### 批量异步导入
-
-1. 逐个上传文件到 `/api/staged-files`
-2. 收集多个 `staged_file_id`
-3. 调用 `kb_document_import_batch_submit_from_staged`
-4. 轮询 `kb_document_import_batch_get`
-5. 必要时调用 `kb_document_import_batch_cancel`
-
----
-
-## 已移除的旧接口
-
-以下旧接口已移除，不应再调用：
-
-- `kb_document_import`
-- `kb_document_update`
-- `kb_document_import_batch_submit`
-
-原因：
-
-- 旧接口依赖 MCP 参数承载大文件内容
-- 远端部署下不适合大文件传输
-- 当前标准方案已统一为 `staged_file + *_from_staged`
-
----
-
-## 架构说明
-
-### 业务主库
-
-- PostgreSQL
-
-负责：
-
-- 分类
-- 文档
-- 切片
-- 暂存文件
-- 批量导入任务
-
-### 向量检索
-
-- Milvus
-
-负责：
-
-- 稠密向量检索
-- BM25 词法检索
-- 混合检索
-
-### 文件存储
-
-- 业务文件存储：MinIO
-- 暂存文件与正式文档原件都保存为 `s3://bucket/key` 形式的对象 URI
-- PostgreSQL 保存文件元数据和对象引用
-- 删除失败时会落 `kb_storage_gc_task` 进入后台补偿清理
-
-当前开发环境默认 bucket：
-
-- 暂存文件：`kb-staged-files`
-- 正式文档：`kb-documents`
-
-### 检索策略
-
-- 稠密向量：Embedding 模型
-- 词法检索：Milvus BM25
-- `content` 字段启用 analyzer
-- 当前 analyzer 为中英文自动识别：
-  - 英文：`standard + lowercase`
-  - 中文：`jieba + removepunct`
-
-### 检索粒度
-
-- `chunk`
-
-不是整篇文档。
-
----
-
-## 目录结构
-
-```text
-knowledgebase/
-  app/            配置与应用初始化
-  db/             数据库会话与建表入口
-  domain/         领域异常与常量
-  http/           普通 HTTP 接口
-  integrations/   外部集成（解析、切分、Milvus、存储、Embedding）
-  mcp/            MCP Server 与 Tool 注册
-  models/         ORM 模型
-  repositories/   仓储层
-  schemas/        Pydantic 输入输出模型
-  services/       业务服务层
-  worker/         后台任务 worker
-
-docs/             设计文档与测试报告
-sql/              初始化 SQL
-test/             测试
-skills/           供其他 Agent 使用的技能文档
-```
-
----
-
-## 环境准备
-
-开发环境：
+### 2.1 配置 API
+配置 embedding模型（默认使用ollama）
+已支持嵌入模型提供商：
+- ollama
+- ailiyun
+统一使用 `dev` 配置：
 
 ```bash
-cp .env.dev.example .env.dev
+cp env/.env.dev.example env/.env.dev
 ```
 
-生产环境：
+### 2.3 启动服务
+
+启动服务：
 
 ```bash
-cp .env.prod.example .env.prod
+docker compose -f docker/docker-compose.dev.yml --env-file env/.env.dev up --build -d
 ```
 
-本地依赖同步：
 
-```bash
-uv sync
-```
+### 2.4 MCP 配置
 
-Embedding 配置约定：
+项目提供了一个 MCP 配置示例文件：
 
-- 开发环境样例默认使用主机 Ollama 的 OpenAI 兼容接口：`http://host.docker.internal:11434/v1`
-- 当前开发样例模型：`qwen3-embedding:0.6b`
-- 统一使用 `KNOWLEDGEBASE_EMBEDDING_PROVIDER`
-- 统一使用 `KNOWLEDGEBASE_EMBEDDING_API_KEY`
-- 统一使用 `KNOWLEDGEBASE_EMBEDDING_BASE_URL`
-- 统一使用 `KNOWLEDGEBASE_EMBEDDING_MODEL`
-- 统一使用 `KNOWLEDGEBASE_EMBEDDING_DIMENSION`
-- 服务启动时会校验配置、远端 embedding 可用性，以及现有向量资产与 Milvus 维度是否匹配
-- 当前不再允许 `mock` 作为运行时 embedding provider
+- [env/.mcp.json](env/.mcp.json)
 
-语法检查：
 
-```bash
-PYTHONPYCACHEPREFIX=/tmp/knowledgebase-pyc python3 -m compileall knowledgebase test main.py
-```
-
----
-
-## Docker 开发环境
-
-启动：
-
-```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev up --build -d
-```
-
-网页入口：
-
-```bash
-http://127.0.0.1:${NGINX_PORT:-8080}/ui
-```
-
-查看状态：
-
-```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev ps
-```
-
-查看应用日志：
-
-```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 app
-```
-
-查看 worker 日志：
-
-```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 worker
-```
-
-查看 nginx 日志：
-
-```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 nginx
-```
-
-停止：
-
-```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev down
-```
-
----
-
-## Docker 生产环境
-
-启动：
-
-```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod up --build -d
-```
-
-停止：
-
-```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod down
-```
-
----
-
-## 启动后的主要地址
-
-- MCP HTTP: `http://127.0.0.1:8000/mcp`
-- 文件上传 HTTP: `http://127.0.0.1:8000/api/staged-files`
-- PostgreSQL: `127.0.0.1:5432`
-- Milvus: `127.0.0.1:19530`
-- MinIO API: `http://127.0.0.1:9000`
-- MinIO Console: `http://127.0.0.1:9001`
-
----
-
-## Claude Code 连接 MCP
-
-项目本地运行后，可以把 Claude Code 接到当前 MCP Server：
+如果你使用 Claude Code，也可以直接用命令注册当前项目提供的 MCP 交互入口：
 
 ```bash
 claude mcp add --transport http --scope project knowledgebase http://127.0.0.1:8000/mcp
 ```
 
-检查：
+检查是否注册成功：
 
 ```bash
 claude mcp list
 claude mcp get knowledgebase
 ```
 
----
+### 2.5 Skills 配置
 
-## 文件上传示例
+项目已经内置知识库使用 Skill：
 
-```bash
-curl -X POST http://127.0.0.1:8000/api/staged-files \
-  -F "file=@/path/to/example.pdf;type=application/pdf"
+- [skills/knowledgebase-mcp/SKILL.md](skills/knowledgebase-mcp/SKILL.md)
+
+根据运行时环境配置skills
+
+## 3. 使用
+
+### 3.1 通过 Claude Code 使用
+
+推荐流程：
+
+1. 先启动知识库服务
+2. 把 MCP 交互入口挂到 Claude Code
+3. 在 Claude Code 中直接用自然语言调用知识库能力
+
+然后你可以在 Claude Code 里直接描述任务，例如：
+
+- 创建一个分类“投资研究”
+- 上传并导入一份 PDF 到指定分类
+- 查询某个分类下的全部文档
+- 检索“中美利差”相关内容
+
+
+### 3.2 查看可视化界面
+
+服务启动后，直接访问：
+
+```text
+http://127.0.0.1:8080/ui
 ```
 
-成功后返回：
-
-- `data.staged_file.id`
-- `data.staged_file.staged_file_uid`
-- `data.staged_file.status`
-
-随后再调用：
-
-- `kb_document_import_from_staged`
-
----
-
-## 检索示例
-
-`kb_search_retrieve` 的 `alpha` 语义：
-
-- `0.0`：纯语义检索
-- `1.0`：纯 BM25 检索
-- 中间值：混合检索
-
-经验建议：
-
-- 英文定理名、术语名：优先 `alpha=1.0`
-- 自然语言问法：优先 `alpha=0.0 ~ 0.5`
-- 已知分类或文档范围时，尽量带上 `category_id` 或 `document_id`
-
----
-
-## 测试
-
-全量测试：
-
-```bash
-docker exec knowledgebase-app-dev sh -lc 'cd /app && /opt/venv/bin/python -m test.run_suite'
-```
-
-查看最新测试报告：
-
-```bash
-sed -n '1,120p' docs/测试文档-time.md
-```
-
-当前最新结果应以测试报告为准。
-
----
-
-## 重要文档
-
-- [数据库设计方案.md](docs/数据库设计方案.md)
-- [MCP接口设计方案.md](docs/MCP接口设计方案.md)
-- [测试文档-time.md](docs/测试文档-time.md)
-- [AGENTS.md](AGENTS.md)
-- [SKILL.md](skills/knowledgebase-mcp/SKILL.md)
-
----
-
-## 当前工程约定
-
-1. PostgreSQL 是业务真相源，Milvus 不是主库。
-2. 文档更新采用整篇重建。
-3. 检索结果必须经 PostgreSQL 回查后返回。
-4. 跨 PostgreSQL / Milvus / 文件存储操作需要补偿与一致性控制。
-5. 远端标准导入路径统一使用 `staged_file + *_from_staged`。

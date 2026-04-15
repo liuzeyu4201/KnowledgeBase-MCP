@@ -43,8 +43,8 @@
 
 当前开发与生产编排中已经包含 MinIO，当前已经同时承担两类职责：
 
-- `docker-compose.dev.yml`
-- `docker-compose.prod.yml`
+- `docker/docker-compose.dev.yml`
+- `docker/docker-compose.prod.yml`
 
 1. Milvus 的底层对象存储依赖
 2. 业务文件与暂存文件的对象存储

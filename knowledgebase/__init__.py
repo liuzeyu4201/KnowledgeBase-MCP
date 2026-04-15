@@ -1,1 +1,1 @@
-"""KnowledgeBase MCP Server 包。"""
+"""KnowledgeBase 知识库项目包。"""

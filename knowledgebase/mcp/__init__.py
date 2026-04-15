@@ -1,1 +1,1 @@
-"""MCP Server 入口。"""
+"""KnowledgeBase 的 MCP 交互入口。"""
