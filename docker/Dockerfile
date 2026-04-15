@@ -15,7 +15,7 @@ RUN apt-get update \
 
 RUN pip install --no-cache-dir uv
 
-COPY pyproject.toml README.md main.py ./
+COPY pyproject.toml README.md ./
 COPY knowledgebase ./knowledgebase
 COPY sql ./sql
 
@@ -23,10 +23,10 @@ FROM base AS dev
 
 RUN uv sync --no-dev
 
-CMD ["sh", "-c", "uv sync --no-dev && python main.py"]
+CMD ["sh", "-c", "uv sync --no-dev && python -m knowledgebase.mcp.server"]
 
 FROM base AS prod
 
 RUN uv sync --no-dev
 
-CMD ["python", "main.py"]
+CMD ["python", "-m", "knowledgebase.mcp.server"]

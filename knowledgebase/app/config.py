@@ -110,7 +110,7 @@ def get_settings() -> Settings:
     transport = "streamable-http" if raw_transport == "http" else raw_transport
 
     return Settings(
-        app_name=os.getenv("KNOWLEDGEBASE_APP_NAME", "KnowledgeBase MCP Server"),
+        app_name=os.getenv("KNOWLEDGEBASE_APP_NAME", "KnowledgeBase"),
         database_url=os.getenv(
             "KNOWLEDGEBASE_DATABASE_URL",
             "postgresql+psycopg://knowledgebase:knowledgebase@localhost:5432/knowledgebase",

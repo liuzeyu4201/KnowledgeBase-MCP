@@ -2,19 +2,19 @@
 
 ## 项目声明
 
-本项目旨在构建一个**面向知识库场景的 MCP Server**，供上层 Agent 通过标准化协议调用，实现对底层知识库与向量数据库的**增、删、改、查（CRUD）**操作。
+本项目旨在构建一个**面向知识管理与检索场景的知识库项目**。其中，**MCP Server 是对外提供的标准交互入口**，供上层 Agent 通过标准化协议调用，实现对底层知识库与向量数据库的**增、删、改、查（CRUD）**操作。
 
 项目核心目标如下：
 
 1. **服务目标明确**
-   提供一个可被 Agent 稳定调用的 MCP Server，使其能够围绕知识库数据完成写入、查询、更新、删除等能力，并支持后续扩展检索增强、权限控制、审计追踪、任务编排等功能。
+   提供一个可被 Agent 稳定调用的知识库系统，并通过 MCP Server 暴露标准交互入口，使其能够围绕知识库数据完成写入、查询、更新、删除等能力，并支持后续扩展检索增强、权限控制、审计追踪、任务编排等功能。
 
 2. **技术栈统一**
 
    * 编程语言：Python
    * 包管理与运行环境：uv
    * 向量数据库：Milvus
-   * 协议定位：MCP Server
+   * 对外交互协议：MCP Server
 
 3. **工程要求**
    本项目必须以**可扩展、稳定、生产级、模块化**为基本建设原则，避免一次性脚本式开发。所有实现应优先满足以下要求：
@@ -28,7 +28,7 @@
    * 可演进的接口设计
 
 4. **使用场景**
-   上层 Agent 通过调用 MCP Server，执行知识库相关操作，例如：
+   上层 Agent 通过调用 MCP Server 这一交互入口，执行知识库相关操作，例如：
 
    * 新增知识条目
    * 删除知识条目
@@ -57,7 +57,7 @@
 ---
 ## 一句话定义
 
-这是一个基于 **Python + uv + Milvus** 构建的、供 **Agent 调用的知识库 MCP Server** 项目，目标是以**生产级、模块化、可扩展、稳定**的方式，提供面向知识库数据的标准化管理与检索能力。
+这是一个基于 **Python + uv + Milvus** 构建的知识库项目，目标是以**生产级、模块化、可扩展、稳定**的方式，提供面向知识数据的管理与检索能力；其中 **MCP Server 负责对外标准交互**。
 
 ---
 
@@ -169,48 +169,53 @@ uv sync
 ```
 
 ```bash
-PYTHONPYCACHEPREFIX=/tmp/knowledgebase-pyc python3 -m compileall knowledgebase test main.py
+PYTHONPYCACHEPREFIX=/tmp/knowledgebase-pyc python3 -m compileall knowledgebase test
 ```
 
-### 2. Docker 开发环境
+### 2. 部署目录约定
 
-启动开发环境：
+* `docker/`：Dockerfile、Compose 编排、Nginx 配置
+* `env/`：统一环境变量文件
+
+### 3. Docker 环境
+
+启动环境：
 
 ```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev up --build -d
+docker compose -f docker/docker-compose.dev.yml --env-file env/.env.dev up --build -d
 ```
 
 仅重启应用容器：
 
 ```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev restart app
+docker compose -f docker/docker-compose.dev.yml --env-file env/.env.dev restart app
 ```
 
 查看容器状态：
 
 ```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev ps
+docker compose -f docker/docker-compose.dev.yml --env-file env/.env.dev ps
 ```
 
 查看应用日志：
 
 ```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 app
+docker compose -f docker/docker-compose.dev.yml --env-file env/.env.dev logs --tail 200 app
 ```
 
 查看 nginx 日志：
 
 ```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev logs --tail 200 nginx
+docker compose -f docker/docker-compose.dev.yml --env-file env/.env.dev logs --tail 200 nginx
 ```
 
-停止开发环境：
+停止环境：
 
 ```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev down
+docker compose -f docker/docker-compose.dev.yml --env-file env/.env.dev down
 ```
 
-### 3. 进入容器执行命令
+### 4. 进入容器执行命令
 
 ```bash
 docker exec knowledgebase-app-dev sh -lc 'cd /app && /opt/venv/bin/python -m test.run_suite'
@@ -224,7 +229,7 @@ docker exec knowledgebase-app-dev sh -lc 'cd /app && /opt/venv/bin/python -m uni
 docker exec knowledgebase-app-dev sh -lc 'curl -i http://127.0.0.1:8000/mcp'
 ```
 
-### 4. Git 操作
+### 5. Git 操作
 
 查看分支和工作区：
 
@@ -252,7 +257,7 @@ git switch dev
 git merge --no-ff test
 ```
 
-### 5. 当前最常用的测试入口
+### 6. 当前最常用的测试入口
 
 全量测试：
 

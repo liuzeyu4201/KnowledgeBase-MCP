@@ -8,16 +8,17 @@ services:
     ports:
       - "${NGINX_PORT:-8080}:80"
     volumes:
-      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
   app:
     build:
-      context: .
+      context: ..
+      dockerfile: docker/Dockerfile
       target: dev
     container_name: knowledgebase-app-dev
     env_file:
-      - .env.dev
+      - ../env/.env.dev
     environment:
       KNOWLEDGEBASE_MILVUS_HOST: milvus
       KNOWLEDGEBASE_MILVUS_PORT: 19530
@@ -38,18 +39,19 @@ services:
       retries: 12
       start_period: 20s
     volumes:
-      - .:/app
+      - ../:/app
     ports:
       - "${APP_PORT:-8000}:8000"
     restart: unless-stopped
 
   worker:
     build:
-      context: .
+      context: ..
+      dockerfile: docker/Dockerfile
       target: dev
     container_name: knowledgebase-worker-dev
     env_file:
-      - .env.dev
+      - ../env/.env.dev
     environment:
       KNOWLEDGEBASE_MILVUS_HOST: milvus
       KNOWLEDGEBASE_MILVUS_PORT: 19530
@@ -60,7 +62,7 @@ services:
       milvus:
         condition: service_started
     volumes:
-      - .:/app
+      - ../:/app
     command: ["sh", "-c", "uv sync --no-dev && python -m knowledgebase.worker.import_worker"]
     restart: unless-stopped
 
@@ -68,7 +70,7 @@ services:
     image: postgres:16-alpine
     container_name: knowledgebase-postgres-dev
     env_file:
-      - .env.dev
+      - ../env/.env.dev
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}

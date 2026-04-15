@@ -83,3 +83,7 @@ def run() -> None:
         port=settings.mcp_port,
         log_level="info",
     )
+
+
+if __name__ == "__main__":
+    run()
