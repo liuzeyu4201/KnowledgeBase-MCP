@@ -6,7 +6,7 @@ services:
       app:
         condition: service_healthy
     ports:
-      - "${NGINX_PORT:-8080}:80"
+      - "${PUBLIC_BIND_HOST:-0.0.0.0}:${NGINX_PORT:-8080}:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
@@ -41,7 +41,7 @@ services:
     volumes:
       - ../:/app
     ports:
-      - "${APP_PORT:-8000}:8000"
+      - "${LOCAL_BIND_HOST:-127.0.0.1}:${APP_PORT:-8000}:8000"
     restart: unless-stopped
 
   worker:
@@ -81,7 +81,7 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${LOCAL_BIND_HOST:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -121,8 +121,8 @@ services:
       timeout: 20s
       retries: 3
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${LOCAL_BIND_HOST:-127.0.0.1}:${MINIO_API_PORT:-9000}:9000"
+      - "${LOCAL_BIND_HOST:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_dev_data:/minio_data
     restart: unless-stopped
@@ -149,8 +149,8 @@ services:
       minio:
         condition: service_healthy
     ports:
-      - "${MILVUS_PORT:-19530}:19530"
-      - "${MILVUS_WEB_PORT:-9091}:9091"
+      - "${LOCAL_BIND_HOST:-127.0.0.1}:${MILVUS_PORT:-19530}:19530"
+      - "${LOCAL_BIND_HOST:-127.0.0.1}:${MILVUS_WEB_PORT:-9091}:9091"
     volumes:
       - milvus_dev_data:/var/lib/milvus
     restart: unless-stopped

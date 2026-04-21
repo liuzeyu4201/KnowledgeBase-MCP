@@ -28,6 +28,12 @@
 - `kb_staged_file_list`
 - `kb_staged_file_delete`
 
+访问边界约定：
+
+- 本机调试允许直连应用入口，例如 `http://127.0.0.1:8000`
+- 公网访问必须统一经过 Nginx 入口
+- 这条约束同时适用于 `/mcp`、`POST /api/staged-files`、网页聚合 API 与 WebSocket
+
 ---
 
 ## 2. 统一协议
@@ -314,6 +320,11 @@
 ## 4.1 配套上传接口
 
 ### 4.1.1 `POST /api/staged-files`
+
+访问说明：
+
+- 本机调试可直接访问 `http://127.0.0.1:8000/api/staged-files`
+- 公网访问必须通过 Nginx，例如 `https://<你的域名>/api/staged-files`
 
 用途：
 
